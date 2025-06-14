@@ -1,0 +1,27 @@
+# Byte-compiled / virtualenv
+__pycache__/
+.venv/
+*.py[cod]
+*.egg-info/
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Database
+*.db
+*.sqlite3
+
+# Temporary files
+*.tmp
+*.temp
