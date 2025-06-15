@@ -38,6 +38,10 @@ if 'start_time' not in st.session_state:
     st.session_state.start_time = None
 if 'generation_history' not in st.session_state:
     st.session_state.generation_history = []
+if 'answered_questions' not in st.session_state:
+    st.session_state.answered_questions = set()
+if 'quiz_choice_key' not in st.session_state:
+    st.session_state.quiz_choice_key = 1
 
 st.title("🎯 Study Quiz App")
 st.markdown("資格試験対策用のクイズ学習アプリ")
@@ -125,14 +129,16 @@ if page == "🏠 ホーム":
                         
             except Exception as e:
                 st.error(f"データベース接続エラー: {e}")
-        else:
-            st.warning("⚠️ データベースに接続できません")
+        else:            st.warning("⚠️ データベースに接続できません")
     
     with col2:
         st.markdown("### 🚀 クイズを開始")
         if st.button("🎲 ランダムクイズ", use_container_width=True):
             st.session_state.current_question = None
             st.session_state.show_result = False
+            st.session_state.user_answer = None
+            # 回答済み問題リストをクリア（新しいクイズセッション開始）
+            st.session_state.answered_questions.clear()
             st.success("サイドバーから「🎲 クイズ」を選択してください！")
 
 elif page == "🎲 クイズ":
@@ -147,20 +153,47 @@ elif page == "🎲 クイズ":
             question_service = QuestionService(session)
             choice_service = ChoiceService(session)
             user_answer_service = UserAnswerService(session)
-            
-            # 新しい問題を取得
+              # 新しい問題を取得
             if st.session_state.current_question is None:
-                questions = question_service.get_random_questions(limit=1)
-                if questions:
-                    st.session_state.current_question = questions[0]
+                # 既に回答した問題を除外して取得
+                max_attempts = 10
+                attempt = 0
+                question = None
+                
+                while attempt < max_attempts:
+                    questions = question_service.get_random_questions(limit=5)  # 複数取得して選択
+                    if questions:
+                        # 未回答の問題を探す
+                        for q in questions:
+                            if q.id not in st.session_state.answered_questions:
+                                question = q
+                                break
+                        
+                        if question:
+                            break
+                        else:
+                            # 全ての問題が回答済みの場合、リセット
+                            if len(st.session_state.answered_questions) > 0:
+                                st.session_state.answered_questions.clear()
+                                st.info("🔄 全ての問題を回答しました。問題をリセットします。")
+                                question = questions[0]  # 最初の問題を選択
+                                break
+                    attempt += 1
+                
+                if question:
+                    st.session_state.current_question = question
                     st.session_state.user_answer = None
                     st.session_state.show_result = False
                     st.session_state.start_time = time.time()
-                else:
+                    st.session_state.quiz_choice_key += 1  # ラジオボタンのキーを更新                else:
                     st.error("問題が見つかりません。")
                     st.stop()
             
             question = st.session_state.current_question
+            
+            # 進捗表示
+            if len(st.session_state.answered_questions) > 0:
+                st.info(f"📊 このセッションで回答済み: {len(st.session_state.answered_questions)}問")
             
             # 問題表示
             st.markdown(f"### {get_difficulty_emoji(question.difficulty)} {question.title}")
@@ -170,8 +203,7 @@ elif page == "🎲 クイズ":
             # 選択肢を取得
             choices = choice_service.get_choices_by_question(question.id)
             
-            if not st.session_state.show_result:
-                # 回答フェーズ
+            if not st.session_state.show_result:                # 回答フェーズ
                 st.markdown("---")
                 st.markdown("**選択肢を選んでください:**")
                 
@@ -181,7 +213,7 @@ elif page == "🎲 クイズ":
                     "回答を選択:",
                     range(len(choices)),
                     format_func=lambda x: choice_labels[x],
-                    key="quiz_choice"
+                    key=f"quiz_choice_{st.session_state.quiz_choice_key}"
                 )
                 
                 col1, col2 = st.columns([1, 1])
@@ -192,8 +224,7 @@ elif page == "🎲 クイズ":
                         
                         selected_choice = choices[selected_idx]
                         is_correct = selected_choice.is_correct
-                        
-                        # 回答を記録
+                          # 回答を記録
                         user_answer_service.record_answer(
                             question_id=question.id,
                             selected_choice_id=selected_choice.id,
@@ -201,6 +232,8 @@ elif page == "🎲 クイズ":
                             answer_time=answer_time,
                             session_id=st.session_state.session_id
                         )
+                          # 回答済み問題に追加
+                        st.session_state.answered_questions.add(question.id)
                         
                         st.session_state.user_answer = {
                             'selected_choice': selected_choice,
@@ -212,7 +245,10 @@ elif page == "🎲 クイズ":
                 
                 with col2:
                     if st.button("⏭️ スキップ", use_container_width=True):
+                        # スキップした問題も回答済みとしてマーク（無限ループ防止）
+                        st.session_state.answered_questions.add(question.id)
                         st.session_state.current_question = None
+                        st.session_state.show_result = False
                         st.rerun()
             
             else:
@@ -234,12 +270,14 @@ elif page == "🎲 クイズ":
                 
                 # 回答時間表示
                 st.markdown(f"**⏱️ 回答時間:** {user_answer['answer_time']:.1f}秒")
-                
-                # 次の問題ボタン
+                  # 次の問題ボタン
                 col1, col2 = st.columns([1, 1])
                 with col1:
                     if st.button("➡️ 次の問題", use_container_width=True):
+                        # 次の問題への移行
                         st.session_state.current_question = None
+                        st.session_state.show_result = False
+                        st.session_state.user_answer = None
                         st.rerun()
                 
                 with col2:
