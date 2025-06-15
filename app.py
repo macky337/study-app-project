@@ -882,13 +882,20 @@ elif page == "🔧 問題管理":
                                         st.session_state.answered_questions.clear()
                                         st.session_state.page = "🎲 クイズ"
                                         st.rerun()
-                                    
+                                        
                                 else:
                                     st.error(f"❌ 問題{mode_text}に失敗しました。OpenAI APIの制限またはテキスト内容に問題がある可能性があります。")
+                                
+                            except Exception as e:
+                                progress_bar.empty()
+                                status_text.empty()
+                                st.error(f"❌ エラーが発生しました: {e}")
+                                st.info("💡 ヒント: OpenAI APIキーが正しく設定されているか、PDFが読み取り可能か確認してください。")
                         
                         else:
                             st.info("📎 PDFファイルをアップロードして問題生成を開始してください")
-                                  # 使用例の表示
+                            
+                            # 使用例の表示
                         with st.expander("💡 使用方法とヒント"):
                             st.markdown("""
                             **🤖 問題生成モード:**
