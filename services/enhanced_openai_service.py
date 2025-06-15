@@ -88,7 +88,7 @@ class EnhancedOpenAIService:
                 )
                 
                 # プライバシー保護の確認ログ
-                print("🔒 プライバシー保護: OpenAI学習無効化ヘッダー送信完了")
+                print("PRIVACY: OpenAI学習無効化ヘッダー送信完了")
                 
                 content = response.choices[0].message.content
                 question_data = json.loads(content)
