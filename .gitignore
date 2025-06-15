@@ -25,3 +25,13 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Test and debug files
+test_*.py
+debug_*.py
+emergency_*.py
+verify_*.py
+diagnose_*.py
+improvement_*.py
+cleanup_*.py
+delete_*.py
