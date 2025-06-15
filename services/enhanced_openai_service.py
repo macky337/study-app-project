@@ -80,12 +80,14 @@ class EnhancedOpenAIService:
                     ],
                     max_tokens=1500,
                     temperature=0.7,
-                    response_format={"type": "json_object"},
-                    # プライバシー保護: データの学習を無効化
+                    response_format={"type": "json_object"},                    # プライバシー保護: データの学習を無効化
                     extra_headers={
                         "X-OpenAI-Skip-Training": "true"
                     }
                 )
+                
+                # プライバシー保護の確認ログ
+                print("🔒 プライバシー保護: OpenAI学習無効化ヘッダー送信完了")
                 
                 content = response.choices[0].message.content
                 question_data = json.loads(content)
@@ -270,12 +272,14 @@ class EnhancedOpenAIService:
                         {"role": "user", "content": prompt}
                     ],
                     max_tokens=max_tokens,
-                    temperature=temperature,
-                    # プライバシー保護: PDFデータの学習を無効化
+                    temperature=temperature,                    # プライバシー保護: PDFデータの学習を無効化
                     extra_headers={
                         "X-OpenAI-Skip-Training": "true"
                     }
                 )
+                
+                # プライバシー保護の確認ログ  
+                print("🔒 プライバシー保護: OpenAI学習無効化ヘッダー送信完了 (汎用API)")
                 
                 return response.choices[0].message.content
                 
