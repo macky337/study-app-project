@@ -16,7 +16,7 @@ class PDFProcessor:
     """PDF処理クラス"""
     
     def __init__(self):
-        self.max_file_size = 10 * 1024 * 1024  # 10MB
+        self.max_file_size = 50 * 1024 * 1024  # 50MB (Railway Hobby Plan対応)
         self.allowed_extensions = ['.pdf']
     
     def validate_file(self, uploaded_file) -> Tuple[bool, str]:

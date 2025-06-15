@@ -642,7 +642,7 @@ elif page == "🔧 問題管理":
                     uploaded_file = st.file_uploader(
                         "PDFファイルを選択してください",
                         type=['pdf'],
-                        help="最大10MBまでのPDFファイルをアップロードできます",
+                        help="最大50MBまでのPDFファイルをアップロードできます（Railway Hobby Plan対応）",
                         key="pdf_uploader"
                     )
                     
@@ -670,7 +670,7 @@ elif page == "🔧 問題管理":
                         col1, col2, col3 = st.columns(3)
                         
                         with col1:
-                            pdf_num_questions = st.slider("生成問題数", 1, 20, 5, key="pdf_num_questions")
+                            pdf_num_questions = st.slider("生成問題数", 1, 30, 10, key="pdf_num_questions")
                         
                         with col2:
                             pdf_difficulty = st.selectbox(

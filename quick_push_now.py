@@ -37,11 +37,12 @@ def run_git_command(command):
 
 def main():
     """現在の修正をプッシュ"""
-    print("⚡ クイックGitプッシュ - PDF機能統合完了")
+    print("⚡ クイックGitプッシュ - Railway Hobby Plan最適化")
     print("=" * 50)
-      # コミットメッセージ
+    
+    # コミットメッセージ
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    commit_message = f"feat: PDFアップロード機能をapp.pyに統合完了 - {timestamp}"
+    commit_message = f"feat: Railway Hobby Plan対応 - PDF 50MB制限と最適化 - {timestamp}"
     
     print(f"📝 コミットメッセージ: {commit_message}")
     print()
@@ -60,7 +61,7 @@ def main():
             return        print()
     
     print("🎉 プッシュ完了！")
-    print("✅ PDF機能統合が正常にプッシュされました")
+    print("✅ Railway Hobby Plan最適化が正常にプッシュされました")
 
 if __name__ == "__main__":
     main()
