@@ -594,21 +594,20 @@ elif page == "🔧 問題管理":
                                     'category': category,
                                     'difficulty': difficulty
                                 })
-                                
-                                # 生成された問題のIDを表示
+                                  # 生成された問題のIDを表示
                                 with st.expander("📋 生成された問題の詳細"):
                                     for i, qid in enumerate(generated_ids):
-                                        st.text(f"問題 {i+1}: ID {qid}")
+                                        st.markdown(f"### 問題 {i+1} (ID: {qid})")
                                         
                                         # 生成された問題の詳細を表示
                                         question = question_service.get_question_by_id(qid)
                                         if question:
                                             st.markdown(f"**タイトル:** {question.title}")
                                             st.markdown(f"**カテゴリ:** {question.category}")
-                                            with st.expander(f"問題内容を表示 (ID: {qid})"):
-                                                st.markdown(f"**問題:** {question.content}")
-                                                if question.explanation:
-                                                    st.markdown(f"**解説:** {question.explanation}")
+                                            st.markdown(f"**問題:** {question.content}")
+                                            if question.explanation:
+                                                st.markdown(f"**解説:** {question.explanation}")
+                                            st.markdown("---")
                             else:
                                 st.error("❌ 問題生成に失敗しました。OpenAI APIの制限またはネットワークエラーの可能性があります。")
                         
