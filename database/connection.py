@@ -6,20 +6,37 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Database URL
+# Database URL with fallback and debugging
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+print(f"🔍 Environment variables check:")
+print(f"   DATABASE_URL: {'✅ Set' if DATABASE_URL else '❌ Not set'}")
+
+if not DATABASE_URL:
+    # Try alternative environment variable names
+    DATABASE_URL = os.getenv("DATABASE_PUBLIC_URL") or os.getenv("POSTGRES_URL")
+    if DATABASE_URL:
+        print(f"   Found alternative URL: ✅")
+    else:
+        print(f"   Available env vars: {list(os.environ.keys())}")
+        raise ValueError(
+            "DATABASE_URL environment variable is not set. "
+            "Please check Railway Variables configuration."
+        )
+
 # Create engine
-if DATABASE_URL:
+try:
     # PostgreSQL connection with proper encoding
     engine = create_engine(
         DATABASE_URL, 
-        echo=True,
+        echo=False,  # Set to False in production
         pool_pre_ping=True,
         connect_args={"client_encoding": "utf8"}
     )
-else:
-    raise ValueError("DATABASE_URL environment variable is not set")
+    print("✅ Database engine created successfully")
+except Exception as e:
+    print(f"❌ Failed to create database engine: {e}")
+    raise
 
 
 def get_session():
