@@ -37,12 +37,11 @@ def run_git_command(command):
 
 def main():
     """現在の修正をプッシュ"""
-    print("⚡ クイックGitプッシュ - expanderネストエラー修正")
+    print("⚡ クイックGitプッシュ - PDF機能統合完了")
     print("=" * 50)
-    
-    # コミットメッセージ
+      # コミットメッセージ
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    commit_message = f"fix: expanderネストエラーを修正とGit自動化スクリプト改善 - {timestamp}"
+    commit_message = f"feat: PDFアップロード機能をapp.pyに統合完了 - {timestamp}"
     
     print(f"📝 コミットメッセージ: {commit_message}")
     print()
@@ -58,11 +57,10 @@ def main():
         print(f"[{i}/3] ", end="")
         if not run_git_command(command):
             print(f"\n❌ ステップ{i}で失敗しました")
-            return
-        print()
+            return        print()
     
     print("🎉 プッシュ完了！")
-    print("✅ expanderネストエラー修正が正常にプッシュされました")
+    print("✅ PDF機能統合が正常にプッシュされました")
 
 if __name__ == "__main__":
     main()
