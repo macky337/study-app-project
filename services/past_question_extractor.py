@@ -22,13 +22,16 @@ class PastQuestionExtractor:
         category: str = "過去問",
         progress_callback=None
     ) -> List[int]:
-        """PDFテキストから過去問を抽出"""
-        
+        """PDFテキストから過去問を抽出"""        
         if progress_callback:
             progress_callback("過去問PDFを分析中...", 0.1)
         
         # テキストを問題単位に分割
         questions = self._split_into_questions(text)
+        
+        print(f"🔍 分割結果: {len(questions)}問を検出")
+        for i, q in enumerate(questions[:3]):  # 最初の3問のプレビュー
+            print(f"   問題{i+1}プレビュー: {q[:100]}...")
         
         if progress_callback:
             progress_callback(f"{len(questions)}問の問題を検出しました", 0.2)
@@ -97,13 +100,20 @@ class PastQuestionExtractor:
             questions = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
         
         return questions
-    
     def _extract_question_structure(self, question_text: str) -> Optional[Dict]:
         """OpenAI APIで問題構造を抽出"""
         
+        # 入力テキストが長すぎる場合は切り詰める（トークン制限対策）
+        max_input_length = 3000  # 約750トークン相当
+        if len(question_text) > max_input_length:
+            question_text = question_text[:max_input_length] + "..."
+            print(f"⚠️ 入力テキストを{max_input_length}文字に切り詰めました")
+        
         prompt = f"""
-以下のテキストから、過去問の内容を正確に抽出してください。
+あなたは過去問題集の専門家です。以下のテキストから、過去問の内容を正確に抽出してください。
 テキストに含まれている問題文、選択肢、正解、解説をそのまま抽出し、一切改変しないでください。
+
+【重要】必ずJSON形式で回答してください。他の形式での回答は禁止です。
 
 【抽出ルール】
 1. 問題文：そのまま抽出（問題番号は除去）
@@ -112,8 +122,9 @@ class PastQuestionExtractor:
 4. 解説：解説文をそのまま抽出
 5. 難易度：問題の内容から推定（easy/medium/hard）
 
-【出力形式】
-JSON形式で以下の構造で出力してください：
+【JSON出力フォーマット】
+以下の形式でのみ回答してください：
+
 {{
     "title": "問題のタイトル（20文字以内）",
     "question": "問題文（そのまま）",
@@ -129,9 +140,14 @@ JSON形式で以下の構造で出力してください：
 
 【入力テキスト】
 {question_text}
+
+【注意】JSON形式以外での回答は絶対に禁止です。必ず有効なJSONオブジェクトを返してください。
 """
-        
         try:
+            print(f"🚀 OpenAI API呼び出し開始")
+            print(f"   プロンプト長: {len(prompt)} 文字")
+            print(f"   入力テキスト長: {len(question_text)} 文字")
+            
             response = self.openai_service.call_openai_api(
                 prompt,
                 max_tokens=2000,
@@ -161,7 +177,8 @@ JSON形式で以下の構造で出力してください：
                 
                 except json.JSONDecodeError as e:
                     print(f"❌ JSON解析失敗: {e}")
-                    print(f"Response content: {response}")
+                    print(f"Response content: {response[:500]}...")
+                    print("🔄 フォールバック抽出を試行します")
                     # JSON解析失敗時、簡単な正規表現で抽出を試行
                     return self._fallback_extraction(question_text)
             else:
