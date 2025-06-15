@@ -615,7 +615,7 @@ elif page == "🔧 問題管理":
                             progress_bar.empty()
                             status_text.empty()
                             st.error(f"❌ エラーが発生しました: {e}")
-                            st.info("💡 ヒント: OpenAI APIキーが正しく設定されているか確認してください。")
+                            st.info("💡 ヒント: OpenAI APIキーが正しく設定されているか、PDFが読み取り可能か確認してください。")
                         
                 with col2:
                     if st.button("🔄 フォームリセット"):
@@ -628,15 +628,26 @@ elif page == "🔧 問題管理":
                 try:
                     from services.pdf_processor import PDFProcessor
                     from services.pdf_question_generator import PDFQuestionGenerator
+                    from services.past_question_extractor import PastQuestionExtractor
                     
                     pdf_processor = PDFProcessor()
                     pdf_generator = PDFQuestionGenerator(session)
+                    past_extractor = PastQuestionExtractor(session)
                     
                     st.markdown("""
-                    **PDF教材から問題を自動生成**
+                    **PDF教材から問題を処理**
                     
-                    📚 教科書、参考書、学習資料のPDFをアップロードして、内容に基づいた問題を自動生成できます。
+                    📚 2つのモードから選択できます：
+                    - **問題生成モード**: 教材内容からAIが新しい問題を生成
+                    - **過去問抽出モード**: 既存の問題・正解・解説をそのまま抽出
                     """)
+                    
+                    # 処理モード選択
+                    processing_mode = st.radio(
+                        "処理モードを選択",
+                        ["🤖 問題生成モード", "📝 過去問抽出モード"],
+                        help="問題生成：AIが新しい問題を作成 / 過去問抽出：既存の問題をそのまま利用"
+                    )
                     
                     # ファイルアップロード
                     uploaded_file = st.file_uploader(
@@ -665,44 +676,92 @@ elif page == "🔧 問題管理":
                         
                         # 生成パラメータ
                         st.markdown("---")
-                        st.markdown("**生成設定**")
                         
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            pdf_num_questions = st.slider("生成問題数", 1, 30, 10, key="pdf_num_questions")
-                        
-                        with col2:
-                            pdf_difficulty = st.selectbox(
-                                "難易度",
-                                ["easy", "medium", "hard"],
-                                format_func=lambda x: {"easy": "初級", "medium": "中級", "hard": "上級"}[x],
-                                key="pdf_difficulty"
-                            )
-                        
-                        with col3:
-                            pdf_category = st.text_input("カテゴリ名", "PDF教材", key="pdf_category")
-                        
-                        # テキスト抽出オプション
-                        with st.expander("� 詳細設定"):
-                            extraction_method = st.selectbox(
-                                "テキスト抽出方法",
-                                ["auto", "pypdf2", "pdfplumber"],
-                                format_func=lambda x: {
-                                    "auto": "自動選択（推奨）",
-                                    "pypdf2": "PyPDF2（高速）",
-                                    "pdfplumber": "PDFplumber（高精度）"
-                                }[x],
-                                help="自動選択では両方の方法を試して最適な結果を選択します"
-                            )
+                        if processing_mode == "🤖 問題生成モード":
+                            st.markdown("**🤖 問題生成設定**")
                             
-                            include_explanation = st.checkbox("解説を含める", value=True, key="pdf_explanation")
+                            col1, col2, col3 = st.columns(3)
                             
-                            preview_text = st.checkbox("テキスト抽出結果をプレビュー", value=False)
+                            with col1:
+                                pdf_num_questions = st.slider("生成問題数", 1, 30, 10, key="pdf_num_questions")
+                            
+                            with col2:
+                                pdf_difficulty = st.selectbox(
+                                    "難易度",
+                                    ["easy", "medium", "hard"],
+                                    format_func=lambda x: {"easy": "初級", "medium": "中級", "hard": "上級"}[x],
+                                    key="pdf_difficulty"
+                                )
+                            
+                            with col3:
+                                pdf_category = st.text_input("カテゴリ名", "PDF教材", key="pdf_category")
+                            
+
+                            # テキスト抽出オプション
+                            with st.expander("🔧 詳細設定"):
+                                extraction_method = st.selectbox(
+                                    "テキスト抽出方法",
+                                    ["auto", "pypdf2", "pdfplumber"],
+                                    format_func=lambda x: {
+                                        "auto": "自動選択（推奨）",
+                                        "pypdf2": "PyPDF2（高速）",
+                                        "pdfplumber": "PDFplumber（高精度）"
+                                    }[x],
+                                    help="自動選択では両方の方法を試して最適な結果を選択します"
+                                )
+                                
+                                include_explanation = st.checkbox("解説を含める", value=True, key="pdf_explanation")
+                                
+                                preview_text = st.checkbox("テキスト抽出結果をプレビュー", value=False)
+                            
+
+                            # 問題生成実行
+                            st.markdown("---")
+                            button_label = "🎯 PDFから問題を生成"
+                            
+                        else:  # 過去問抽出モード
+                            st.markdown("**📝 過去問抽出設定**")
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                pdf_category = st.text_input("カテゴリ名", "過去問", key="past_category")
+                            
+                            with col2:
+                                extraction_method = st.selectbox(
+                                    "テキスト抽出方法",
+                                    ["auto", "pypdf2", "pdfplumber"],
+                                    format_func=lambda x: {
+                                        "auto": "自動選択（推奨）",
+                                        "pypdf2": "PyPDF2（高速）",
+                                        "pdfplumber": "PDFplumber（高精度）"
+                                    }[x],
+                                    key="past_extraction_method"
+                                )
+                            
+                            with st.expander("🔧 過去問抽出の詳細設定"):
+                                st.markdown("""
+                                **📋 過去問抽出について:**
+                                - 問題文、選択肢、正解、解説をそのまま抽出
+                                - 元の内容を一切改変しません
+                                - 問題番号で自動分割を試行
+                                - 抽出精度を向上させるため低温度設定を使用
+                                """)
+                                
+                                preview_text = st.checkbox("テキスト抽出結果をプレビュー", value=True, key="past_preview")
+                                
+                                strict_extraction = st.checkbox(
+                                    "厳密抽出モード", 
+                                    value=True, 
+                                    help="より正確な抽出のため、温度設定を最低にします"
+                                )
+                            
+
+                            # 過去問抽出実行
+                            st.markdown("---")
+                            button_label = "📝 PDFから過去問を抽出"
                         
-                        # 問題生成実行
-                        st.markdown("---")
-                        if st.button("🎯 PDFから問題を生成", type="primary", use_container_width=True):
+                        if st.button(button_label, type="primary", use_container_width=True):
                             
                             # プログレス表示
                             progress_bar = st.progress(0)
@@ -742,40 +801,58 @@ elif page == "🔧 問題管理":
                                 with col2:
                                     st.metric("推定単語数", f"{word_count:,}")
                                 
-                                # 問題生成
+                                # プログレスコールバック関数
                                 def pdf_progress_callback(message, progress):
                                     status_text.text(message)
                                     progress_bar.progress(min(progress, 0.95))
                                 
-                                status_text.text("問題を生成中...")
-                                progress_bar.progress(0.3)
-                                
-                                generated_ids = pdf_generator.generate_questions_from_pdf(
-                                    text=extracted_text,
-                                    num_questions=pdf_num_questions,
-                                    difficulty=pdf_difficulty,
-                                    category=pdf_category,
-                                    progress_callback=pdf_progress_callback
-                                )
+                                if processing_mode == "🤖 問題生成モード":
+                                    # 問題生成モード
+                                    status_text.text("問題を生成中...")
+                                    progress_bar.progress(0.3)
+                                    
+                                    generated_ids = pdf_generator.generate_questions_from_pdf(
+                                        text=extracted_text,
+                                        num_questions=pdf_num_questions,
+                                        difficulty=pdf_difficulty,
+                                        category=pdf_category,
+                                        progress_callback=pdf_progress_callback
+                                    )
+                                    
+                                    mode_text = "生成"
+                                    
+                                else:  # 過去問抽出モード
+                                    # 過去問抽出モード
+                                    status_text.text("過去問を抽出中...")
+                                    progress_bar.progress(0.3)
+                                    
+                                    generated_ids = past_extractor.extract_past_questions_from_pdf(
+                                        text=extracted_text,
+                                        category=pdf_category,
+                                        progress_callback=pdf_progress_callback
+                                    )
+                                    
+                                    mode_text = "抽出"
                                 
                                 # 完了
                                 progress_bar.progress(1.0)
-                                status_text.text("問題生成完了！")
+                                status_text.text(f"問題{mode_text}完了！")
                                 
                                 if generated_ids:
-                                    st.success(f"✅ {len(generated_ids)}問の問題を生成しました！")
+                                    st.success(f"✅ {len(generated_ids)}問の問題を{mode_text}しました！")
                                     
                                     # 生成履歴に追加
                                     st.session_state.generation_history.append({
                                         'time': datetime.now().strftime('%H:%M'),
                                         'count': len(generated_ids),
                                         'category': pdf_category,
-                                        'difficulty': pdf_difficulty,
-                                        'source': f'PDF: {uploaded_file.name}'
+                                        'difficulty': pdf_difficulty if processing_mode == "🤖 問題生成モード" else "mixed",
+                                        'source': f'PDF: {uploaded_file.name}',
+                                        'mode': mode_text
                                     })
                                     
                                     # 生成された問題の詳細表示
-                                    with st.expander("📋 生成された問題の詳細"):
+                                    with st.expander(f"📋 {mode_text}された問題の詳細"):
                                         for i, qid in enumerate(generated_ids):
                                             st.markdown(f"### 問題 {i+1} (ID: {qid})")
                                             
@@ -797,7 +874,7 @@ elif page == "🔧 問題管理":
                                                 st.markdown("---")
                                     
                                     # クイズ開始ボタン
-                                    st.markdown("### 🎲 生成した問題でクイズを開始")
+                                    st.markdown(f"### 🎲 {mode_text}した問題でクイズを開始")
                                     if st.button("🚀 クイズを開始", use_container_width=True):
                                         st.session_state.current_question = None
                                         st.session_state.show_result = False
@@ -805,23 +882,16 @@ elif page == "🔧 問題管理":
                                         st.session_state.answered_questions.clear()
                                         st.session_state.page = "🎲 クイズ"
                                         st.rerun()
-                                        
+                                    
                                 else:
-                                    st.error("❌ 問題生成に失敗しました。OpenAI APIの制限またはテキスト内容に問題がある可能性があります。")
-                                
-                            except Exception as e:
-                                progress_bar.empty()
-                                status_text.empty()
-                                st.error(f"❌ エラーが発生しました: {e}")
-                                st.info("💡 ヒント: OpenAI APIキーが正しく設定されているか、PDFが読み取り可能か確認してください。")
-                    
-                    else:
-                        st.info("📎 PDFファイルをアップロードして問題生成を開始してください")
+                                    st.error(f"❌ 問題{mode_text}に失敗しました。OpenAI APIの制限またはテキスト内容に問題がある可能性があります。")
                         
-                        # 使用例の表示
+                        else:
+                            st.info("📎 PDFファイルをアップロードして問題生成を開始してください")
+                                  # 使用例の表示
                         with st.expander("💡 使用方法とヒント"):
                             st.markdown("""
-                            **効果的なPDF問題生成のコツ:**
+                            **🤖 問題生成モード:**
                             
                             📚 **適切なPDF:**
                             - テキストベースのPDF（画像スキャンではない）
@@ -829,14 +899,32 @@ elif page == "🔧 問題管理":
                             - 専門用語や概念の説明が含まれている
                             
                             🎯 **問題生成のコツ:**
-                            - 5-10問程度が最適な生成数
+                            - 5-15問程度が最適な生成数
                             - カテゴリ名を具体的に設定する
                             - 教材の難易度に合わせて設定する
                             
-                            ⚠️ **注意事項:**
+                            ---
+                            
+                            **📝 過去問抽出モード:**
+                            
+                            📄 **適切なPDF:**
+                            - 過去問集や問題集のPDF
+                            - 問題・選択肢・正解・解説が明記されたもの
+                            - 問題番号で区切られた構造
+                            
+                            🎯 **抽出のコツ:**
+                            - 厳密抽出モードを有効にする
+                            - テキストプレビューで構造を確認
+                            - 問題形式が統一されたPDFを使用
+                            - 抽出後は必ず内容を確認
+                            
+                            ---
+                            
+                            ⚠️ **共通注意事項:**
                             - 著作権に注意してください
                             - 個人学習目的での利用を推奨します
-                            - 生成された問題は必ず内容を確認してください
+                            - 生成・抽出された問題は必ず内容を確認してください
+                            - 過去問は原文のまま利用されます
                             """)
                 
                 except ImportError as e:

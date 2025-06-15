@@ -37,12 +37,12 @@ def run_git_command(command):
 
 def main():
     """現在の修正をプッシュ"""
-    print("⚡ クイックGitプッシュ - Railway Hobby Plan最適化")
+    print("⚡ クイックGitプッシュ - 過去問抽出機能追加")
     print("=" * 50)
     
     # コミットメッセージ
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    commit_message = f"feat: Railway Hobby Plan対応 - PDF 50MB制限と最適化 - {timestamp}"
+    commit_message = f"feat: 過去問抽出モード追加 - PDFから既存問題をそのまま抽出 - {timestamp}"
     
     print(f"📝 コミットメッセージ: {commit_message}")
     print()
@@ -58,10 +58,9 @@ def main():
         print(f"[{i}/3] ", end="")
         if not run_git_command(command):
             print(f"\n❌ ステップ{i}で失敗しました")
-            return        print()
-    
+            return        print()    
     print("🎉 プッシュ完了！")
-    print("✅ Railway Hobby Plan最適化が正常にプッシュされました")
+    print("✅ 過去問抽出機能が正常にプッシュされました")
 
 if __name__ == "__main__":
     main()
