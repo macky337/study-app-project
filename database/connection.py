@@ -6,37 +6,44 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Database URL with fallback and debugging
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Database URL with multiple fallbacks
+DATABASE_URL = (
+    os.getenv("DATABASE_URL") or 
+    os.getenv("DATABASE_PUBLIC_URL") or 
+    os.getenv("POSTGRES_URL") or
+    os.getenv("DATABASE_PRIVATE_URL")
+)
 
 print(f"🔍 Environment variables check:")
-print(f"   DATABASE_URL: {'✅ Set' if DATABASE_URL else '❌ Not set'}")
+print(f"   DATABASE_URL: {'✅ Set' if os.getenv('DATABASE_URL') else '❌ Not set'}")
+print(f"   DATABASE_PUBLIC_URL: {'✅ Set' if os.getenv('DATABASE_PUBLIC_URL') else '❌ Not set'}")
+print(f"   POSTGRES_URL: {'✅ Set' if os.getenv('POSTGRES_URL') else '❌ Not set'}")
 
 if not DATABASE_URL:
-    # Try alternative environment variable names
-    DATABASE_URL = os.getenv("DATABASE_PUBLIC_URL") or os.getenv("POSTGRES_URL")
-    if DATABASE_URL:
-        print(f"   Found alternative URL: ✅")
-    else:
-        print(f"   Available env vars: {list(os.environ.keys())}")
-        raise ValueError(
-            "DATABASE_URL environment variable is not set. "
-            "Please check Railway Variables configuration."
+    # Show all available environment variables for debugging
+    available_vars = [var for var in os.environ.keys() if 'DATABASE' in var.upper() or 'POSTGRES' in var.upper()]
+    print(f"   Database-related env vars: {available_vars}")
+    
+    # Temporary fallback - create a mock engine for development
+    print("⚠️  WARNING: No database URL found. Creating mock connection.")
+    print("   Please configure DATABASE_URL in Railway Variables.")
+    
+    # Don't raise error immediately - let the app start and show a user-friendly message
+    DATABASE_URL = None
+    engine = None
+else:
+    try:
+        # PostgreSQL connection with proper encoding
+        engine = create_engine(
+            DATABASE_URL, 
+            echo=False,  # Set to False in production
+            pool_pre_ping=True,
+            connect_args={"client_encoding": "utf8"}
         )
-
-# Create engine
-try:
-    # PostgreSQL connection with proper encoding
-    engine = create_engine(
-        DATABASE_URL, 
-        echo=False,  # Set to False in production
-        pool_pre_ping=True,
-        connect_args={"client_encoding": "utf8"}
-    )
-    print("✅ Database engine created successfully")
-except Exception as e:
-    print(f"❌ Failed to create database engine: {e}")
-    raise
+        print("✅ Database engine created successfully")
+    except Exception as e:
+        print(f"❌ Failed to create database engine: {e}")
+        engine = None
 
 
 def get_session():

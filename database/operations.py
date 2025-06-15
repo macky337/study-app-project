@@ -43,6 +43,58 @@ class QuestionService:
         """ランダムに問題を取得"""
         statement = select(Question).limit(limit)
         return self.session.exec(statement).all()
+    
+    def update_question(
+        self,
+        question_id: int,
+        title: Optional[str] = None,
+        content: Optional[str] = None,
+        category: Optional[str] = None,
+        explanation: Optional[str] = None,
+        difficulty: Optional[str] = None
+    ) -> Optional[Question]:
+        """問題を更新"""
+        question = self.get_question_by_id(question_id)
+        if not question:
+            return None
+        
+        if title is not None:
+            question.title = title
+        if content is not None:
+            question.content = content
+        if category is not None:
+            question.category = category
+        if explanation is not None:
+            question.explanation = explanation
+        if difficulty is not None:
+            question.difficulty = difficulty
+        
+        self.session.commit()
+        self.session.refresh(question)
+        return question
+    
+    def delete_question(self, question_id: int) -> bool:
+        """問題を削除（関連する選択肢と回答も削除）"""
+        question = self.get_question_by_id(question_id)
+        if not question:
+            return False
+        
+        # 関連する選択肢を削除
+        choices_statement = select(Choice).where(Choice.question_id == question_id)
+        choices = self.session.exec(choices_statement).all()
+        for choice in choices:
+            self.session.delete(choice)
+        
+        # 関連するユーザー回答を削除
+        answers_statement = select(UserAnswer).where(UserAnswer.question_id == question_id)
+        answers = self.session.exec(answers_statement).all()
+        for answer in answers:
+            self.session.delete(answer)
+        
+        # 問題本体を削除
+        self.session.delete(question)
+        self.session.commit()
+        return True
 
 
 class ChoiceService:
@@ -74,6 +126,39 @@ class ChoiceService:
         """問題IDで選択肢を取得"""
         statement = select(Choice).where(Choice.question_id == question_id).order_by(Choice.order_num)
         return self.session.exec(statement).all()
+    
+    def update_choice(
+        self,
+        choice_id: int,
+        content: Optional[str] = None,
+        is_correct: Optional[bool] = None,
+        order_num: Optional[int] = None
+    ) -> Optional[Choice]:
+        """選択肢を更新"""
+        choice = self.session.get(Choice, choice_id)
+        if not choice:
+            return None
+        
+        if content is not None:
+            choice.content = content
+        if is_correct is not None:
+            choice.is_correct = is_correct
+        if order_num is not None:
+            choice.order_num = order_num
+        
+        self.session.commit()
+        self.session.refresh(choice)
+        return choice
+    
+    def delete_choice(self, choice_id: int) -> bool:
+        """選択肢を削除"""
+        choice = self.session.get(Choice, choice_id)
+        if not choice:
+            return False
+        
+        self.session.delete(choice)
+        self.session.commit()
+        return True
 
 
 class UserAnswerService:

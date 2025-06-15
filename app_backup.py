@@ -36,8 +36,6 @@ if 'show_result' not in st.session_state:
     st.session_state.show_result = False
 if 'start_time' not in st.session_state:
     st.session_state.start_time = None
-if 'generation_history' not in st.session_state:
-    st.session_state.generation_history = []
 
 st.title("🎯 Study Quiz App")
 st.markdown("資格試験対策用のクイズ学習アプリ")
@@ -97,50 +95,43 @@ if page == "🏠 ホーム":
         - ⏱️ 回答時間の測定
         - 📊 学習履歴と統計の管理
         - 🔄 間違えた問題の復習
-        - 🤖 AI による問題自動生成
         """)
         
         # データベース統計を表示
-        if DATABASE_AVAILABLE:
-            try:
-                with get_database_session() as session:
-                    question_service = QuestionService(session)
-                    user_answer_service = UserAnswerService(session)
+        try:
+            with get_database_session() as session:
+                question_service = QuestionService(session)
+                user_answer_service = UserAnswerService(session)
+                
+                # 問題数を取得
+                total_questions = len(question_service.get_random_questions(limit=1000))
+                
+                # セッション統計を取得
+                stats = user_answer_service.get_user_stats(st.session_state.session_id)
+                
+                st.markdown("### � 統計情報")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("総問題数", total_questions)
+                with col2:
+                    st.metric("回答済み", stats['total'])
+                with col3:
+                    st.metric("正答率", f"{stats['accuracy']}%")
                     
-                    # 問題数を取得
-                    total_questions = len(question_service.get_random_questions(limit=1000))
-                    
-                    # セッション統計を取得
-                    stats = user_answer_service.get_user_stats(st.session_state.session_id)
-                    
-                    st.markdown("### 📊 統計情報")
-                    col1_1, col1_2, col1_3 = st.columns(3)
-                    
-                    with col1_1:
-                        st.metric("総問題数", total_questions)
-                    with col1_2:
-                        st.metric("回答済み", stats['total'])
-                    with col1_3:
-                        st.metric("正答率", f"{stats['accuracy']}%")
-                        
-            except Exception as e:
-                st.error(f"データベース接続エラー: {e}")
-        else:
-            st.warning("⚠️ データベースに接続できません")
+        except Exception as e:
+            st.error(f"データベース接続エラー: {e}")
     
     with col2:
         st.markdown("### 🚀 クイズを開始")
         if st.button("🎲 ランダムクイズ", use_container_width=True):
             st.session_state.current_question = None
             st.session_state.show_result = False
+            # クイズページに切り替え（手動でサイドバーから選択してもらう）
             st.success("サイドバーから「🎲 クイズ」を選択してください！")
 
 elif page == "🎲 クイズ":
     st.subheader("🎲 クイズモード")
-    
-    if not DATABASE_AVAILABLE:
-        st.error("⚠️ データベースに接続できないため、クイズ機能は利用できません。")
-        st.stop()
     
     try:
         with get_database_session() as session:
@@ -246,6 +237,7 @@ elif page == "🎲 クイズ":
                     if st.button("🏠 ホームに戻る", use_container_width=True):
                         st.session_state.current_question = None
                         st.session_state.show_result = False
+                        # ホームページに切り替え（手動でサイドバーから選択してもらう）
                         st.success("サイドバーから「🏠 ホーム」を選択してください！")
     
     except Exception as e:
@@ -253,10 +245,6 @@ elif page == "🎲 クイズ":
 
 elif page == "📊 統計":
     st.subheader("📊 学習統計")
-    
-    if not DATABASE_AVAILABLE:
-        st.error("⚠️ データベースに接続できないため、統計機能は利用できません。")
-        st.stop()
     
     try:
         with get_database_session() as session:
@@ -267,8 +255,7 @@ elif page == "📊 統計":
             session_stats = user_answer_service.get_user_stats(st.session_state.session_id)
             
             st.markdown("### 📈 統計サマリー")
-            
-            col1, col2 = st.columns(2)
+              col1, col2 = st.columns(2)
             
             with col1:
                 st.markdown("#### 🌍 全体統計")
@@ -374,23 +361,21 @@ elif page == "🔧 問題管理":
                         
                         if question.explanation:
                             st.markdown(f"**解説:** {question.explanation}")
-                          # 編集・削除ボタン
+                        
+                        # 編集・削除ボタン
                         col1, col2, col3 = st.columns([1, 1, 3])
                         with col1:
                             if st.button(f"✏️ 編集", key=f"edit_{question.id}"):
                                 st.session_state.edit_question_id = question.id
-                                st.info("編集機能は今後実装予定です")
+                                st.rerun()
                         
                         with col2:
                             if st.button(f"🗑️ 削除", key=f"delete_{question.id}"):
                                 if st.session_state.get(f"confirm_delete_{question.id}", False):
                                     # 実際に削除
-                                    if question_service.delete_question(question.id):
-                                        st.success(f"問題 ID {question.id} を削除しました")
-                                        st.session_state[f"confirm_delete_{question.id}"] = False
-                                        st.rerun()
-                                    else:
-                                        st.error("削除に失敗しました")
+                                    question_service.delete_question(question.id)
+                                    st.success(f"問題 ID {question.id} を削除しました")
+                                    st.rerun()
                                 else:
                                     st.session_state[f"confirm_delete_{question.id}"] = True
                                     st.warning("もう一度クリックして削除を確認してください")
@@ -443,66 +428,46 @@ elif page == "🔧 問題管理":
                 
                 with col2:
                     st.markdown("**生成履歴**")
-                    if st.session_state.generation_history:
-                        for entry in st.session_state.generation_history[-5:]:  # 最新5件
-                            st.text(f"{entry['time']}: {entry['count']}問生成")
-                    else:
-                        st.text("履歴なし")
-                  # 生成実行
+                    if 'generation_history' not in st.session_state:
+                        st.session_state.generation_history = []
+                    
+                    for entry in st.session_state.generation_history[-5:]:  # 最新5件
+                        st.text(f"{entry['time']}: {entry['count']}問生成")
+                
+                # 生成実行
                 st.markdown("---")
                 col1, col2 = st.columns([3, 1])
                 with col1:
                     if st.button("🎲 問題を生成", use_container_width=True, type="primary"):
-                        # プログレス表示用のコンテナ
-                        progress_container = st.empty()
+                        # 生成処理
                         progress_bar = st.progress(0)
                         status_text = st.empty()
                         
                         try:
                             generator = QuestionGenerator(session)
-                            
-                            # OpenAI接続確認
-                            connection_status = generator.validate_openai_connection()
-                            if not connection_status["connected"]:
-                                st.error(f"❌ OpenAI接続エラー: {connection_status['message']}")
-                                st.stop()
-                            
                             generated_ids = []
                             
-                            # プログレスコールバック関数
-                            def update_progress(message, progress):
-                                status_text.text(message)
-                                progress_bar.progress(progress)
-                            
-                            if count == 1:
-                                # 単一問題生成
+                            for i in range(count):
+                                status_text.text(f"問題 {i+1}/{count} を生成中...")
+                                progress_bar.progress((i) / count)
+                                
+                                # トピックを分割（改行区切り）
+                                topics_list = [t.strip() for t in topic.split('\n') if t.strip()] if topic else None
+                                current_topic = topics_list[i % len(topics_list)] if topics_list else None
+                                
                                 question_id = generator.generate_and_save_question(
                                     category=category,
                                     difficulty=difficulty,
-                                    topic=topic if topic else None,
-                                    progress_callback=update_progress
+                                    topic=current_topic
                                 )
                                 
                                 if question_id:
                                     generated_ids.append(question_id)
-                            else:
-                                # 複数問題生成
-                                topics_list = [t.strip() for t in topic.split('\n') if t.strip()] if topic else None
                                 
-                                generated_ids = generator.generate_and_save_multiple_questions(
-                                    category=category,
-                                    difficulty=difficulty,
-                                    count=count,
-                                    topics=topics_list,
-                                    progress_callback=update_progress,
-                                    delay_between_requests=1.5  # Rate limiting
-                                )
+                            progress_bar.progress(1.0)
+                            status_text.text("生成完了！")
                             
                             # 結果表示
-                            progress_container.empty()
-                            progress_bar.empty()
-                            status_text.empty()
-                            
                             if generated_ids:
                                 st.success(f"✅ {len(generated_ids)}問の問題を生成しました！")
                                 
@@ -510,33 +475,19 @@ elif page == "🔧 問題管理":
                                 st.session_state.generation_history.append({
                                     'time': datetime.now().strftime('%H:%M'),
                                     'count': len(generated_ids),
-                                    'category': category,
-                                    'difficulty': difficulty
+                                    'category': category
                                 })
                                 
                                 # 生成された問題のIDを表示
-                                with st.expander("📋 生成された問題の詳細"):
+                                with st.expander("生成された問題ID"):
                                     for i, qid in enumerate(generated_ids):
                                         st.text(f"問題 {i+1}: ID {qid}")
-                                        
-                                        # 生成された問題の詳細を表示
-                                        question = question_service.get_question_by_id(qid)
-                                        if question:
-                                            st.markdown(f"**タイトル:** {question.title}")
-                                            st.markdown(f"**カテゴリ:** {question.category}")
-                                            with st.expander(f"問題内容を表示 (ID: {qid})"):
-                                                st.markdown(f"**問題:** {question.content}")
-                                                if question.explanation:
-                                                    st.markdown(f"**解説:** {question.explanation}")
                             else:
-                                st.error("❌ 問題生成に失敗しました。OpenAI APIの制限またはネットワークエラーの可能性があります。")
+                                st.error("❌ 問題生成に失敗しました")
                         
                         except Exception as e:
-                            progress_container.empty()
-                            progress_bar.empty()
-                            status_text.empty()
                             st.error(f"❌ エラーが発生しました: {e}")
-                            st.info("💡 ヒント: OpenAI APIキーが正しく設定されているか確認してください。")
+                            status_text.text("エラーが発生しました")
                         
                 with col2:
                     if st.button("🔄 フォームリセット"):
@@ -568,7 +519,7 @@ elif page == "🔧 問題管理":
                                 st.text(f"• {label}: {count}問")
                         
                         # 生成トレンド（セッション内）
-                        if st.session_state.generation_history:
+                        if st.session_state.get('generation_history'):
                             st.markdown("**本日の生成履歴**")
                             total_generated = sum(entry['count'] for entry in st.session_state.generation_history)
                             st.metric("本セッション生成数", total_generated)
@@ -599,26 +550,124 @@ elif page == "⚙️ 設定":
     
     with col2:
         st.markdown("**データベース情報**")
-        if DATABASE_AVAILABLE:
+        try:
+            with get_database_session() as session:
+                question_service = QuestionService(session)
+                questions = question_service.get_random_questions(limit=1000)
+                st.text(f"総問題数: {len(questions)}")
+                
+                # カテゴリ別統計
+                categories = {}
+                for q in questions:
+                    categories[q.category] = categories.get(q.category, 0) + 1
+                
+                st.markdown("**カテゴリ別問題数:**")
+                for category, count in categories.items():
+                    st.text(f"• {category}: {count}問")
+        
+        except Exception as e:
+            st.error(f"データベース情報の取得に失敗: {e}")
+
+    # AI問題生成セクション
+    st.markdown("---")
+    st.markdown("### 🤖 AI問題生成")
+    
+    if DATABASE_AVAILABLE:
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown("**OpenAI APIを使用して新しい問題を生成**")
+            
+            # 生成パラメータ
+            gen_col1, gen_col2, gen_col3 = st.columns(3)
+            
+            with gen_col1:
+                category = st.selectbox(
+                    "カテゴリ",
+                    ["基本情報技術者", "応用情報技術者", "プログラミング基礎", "データベース", "ネットワーク", "セキュリティ"],
+                    key="gen_category"
+                )
+            
+            with gen_col2:
+                difficulty = st.selectbox(
+                    "難易度",
+                    ["easy", "medium", "hard"],
+                    format_func=lambda x: {"easy": "初級", "medium": "中級", "hard": "上級"}[x],
+                    key="gen_difficulty"
+                )
+            
+            with gen_col3:
+                count = st.number_input(
+                    "生成数",
+                    min_value=1,
+                    max_value=5,
+                    value=1,
+                    key="gen_count"
+                )
+            
+            topic = st.text_input(
+                "特定のトピック（任意）",
+                placeholder="例: オブジェクト指向プログラミング",
+                key="gen_topic"
+            )
+            
+            # 生成ボタン
+            if st.button("🎲 問題を生成", use_container_width=True):
+                with st.spinner("AI が問題を生成中..."):
+                    try:
+                        with get_database_session() as session:
+                            generator = QuestionGenerator(session)
+                            
+                            if count == 1:
+                                # 単一問題生成
+                                question_id = generator.generate_and_save_question(
+                                    category=category,
+                                    difficulty=difficulty,
+                                    topic=topic if topic else None
+                                )
+                                
+                                if question_id:
+                                    st.success(f"✅ 問題を生成しました！ (ID: {question_id})")
+                                else:
+                                    st.error("❌ 問題生成に失敗しました")
+                            else:
+                                # 複数問題生成
+                                question_ids = generator.generate_and_save_multiple_questions(
+                                    category=category,
+                                    difficulty=difficulty,
+                                    count=count,
+                                    topics=[topic] if topic else None
+                                )
+                                
+                                if question_ids:
+                                    st.success(f"✅ {len(question_ids)}問の問題を生成しました！")
+                                    for i, qid in enumerate(question_ids):
+                                        st.text(f"問題 {i+1}: ID {qid}")
+                                else:
+                                    st.error("❌ 問題生成に失敗しました")
+                    
+                    except Exception as e:
+                        st.error(f"❌ エラーが発生しました: {e}")
+        
+        with col2:
+            st.markdown("**生成統計**")
             try:
                 with get_database_session() as session:
-                    question_service = QuestionService(session)
-                    questions = question_service.get_random_questions(limit=1000)
-                    st.text(f"総問題数: {len(questions)}")
+                    generator = QuestionGenerator(session)
+                    stats = generator.get_generation_stats()
                     
-                    # カテゴリ別統計
-                    categories = {}
-                    for q in questions:
-                        categories[q.category] = categories.get(q.category, 0) + 1
+                    st.metric("総問題数", stats["total_questions"])
                     
-                    st.markdown("**カテゴリ別問題数:**")
-                    for category, count in categories.items():
-                        st.text(f"• {category}: {count}問")
+                    if stats["categories"]:
+                        st.markdown("**カテゴリ別:**")
+                        for cat, count in stats["categories"].items():
+                            st.text(f"• {cat}: {count}問")
             
             except Exception as e:
-                st.error(f"データベース情報の取得に失敗: {e}")
-        else:
-            st.error("データベースに接続できません")
+                st.error(f"統計取得エラー: {e}")
+    
+    else:
+        st.warning("⚠️ データベースに接続できないため、問題生成機能は利用できません。")
 
 # フッター
 st.markdown("---")
