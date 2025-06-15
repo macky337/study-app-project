@@ -10,13 +10,20 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Database connection with error handling
+# Database connection with enhanced error handling
 DATABASE_AVAILABLE = False
 DATABASE_ERROR = None
 
 try:
+    print("🔍 Initializing database connection...")
     from sqlmodel import Session
     from database.connection import engine, DATABASE_URL
+    
+    if engine is None:
+        raise Exception("Database engine could not be created. Check DATABASE_URL.")
+    
+    print("✅ Database engine created successfully")
+    
     from database.operations import QuestionService, ChoiceService, UserAnswerService
     from services.question_generator import QuestionGenerator
     from services.pdf_processor import PDFProcessor
@@ -24,14 +31,24 @@ try:
     from services.past_question_extractor import PastQuestionExtractor
     from utils.helpers import generate_session_id, format_accuracy, get_difficulty_emoji
     
-    DATABASE_AVAILABLE = engine is not None
+    DATABASE_AVAILABLE = True
+    print("✅ All modules imported successfully")
     
+except ImportError as e:
+    DATABASE_ERROR = f"Module import error: {str(e)}"
+    DATABASE_AVAILABLE = False
+    print(f"❌ Import error: {e}")
+    
+    # Create mock function for demo
+    def generate_session_id():
+        return "demo_session"
+        
 except Exception as e:
-    DATABASE_ERROR = str(e)
+    DATABASE_ERROR = f"Database connection error: {str(e)}"
     DATABASE_AVAILABLE = False
     print(f"❌ Database connection error: {e}")
     
-    # Create mock functions for demo
+    # Create mock function for demo
     def generate_session_id():
         return "demo_session"
 

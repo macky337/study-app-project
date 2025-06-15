@@ -26,12 +26,17 @@ if not DATABASE_URL:
     
     # Temporary fallback - create a mock engine for development
     print("⚠️  WARNING: No database URL found. Creating mock connection.")
-    print("   Please configure DATABASE_URL in Railway Variables.")    
+    print("   Please configure DATABASE_URL in Railway Variables.")
+    print("   App will run in demo mode without database functionality.")
+    
     # Don't raise error immediately - let the app start and show a user-friendly message
     DATABASE_URL = None
     engine = None
 else:
     try:
+        print(f"🔗 Attempting database connection...")
+        print(f"   Database URL preview: {DATABASE_URL[:50]}...")
+        
         # PostgreSQL connection with proper encoding and SSL settings
         connect_args = {
             "client_encoding": "utf8",
@@ -42,11 +47,18 @@ else:
             DATABASE_URL, 
             echo=False,  # Set to False in production
             pool_pre_ping=True,
-            connect_args=connect_args        )
-          # Test the connection
+            connect_args=connect_args,
+            pool_timeout=30,  # 30秒タイムアウト
+            pool_recycle=3600  # 1時間で接続をリサイクル
+        )
+        
+        print("✅ Database engine created successfully")
+        
+        # Test the connection
         with engine.connect() as connection:
             result = connection.execute(text("SELECT 1"))
             result.fetchone()
+            print("✅ Database connection test successful")
             
             # Create tables using direct SQL to avoid SQLModel conflicts
             try:
