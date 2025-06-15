@@ -22,7 +22,7 @@ class PastQuestionExtractor:
         category: str = "過去問",
         progress_callback=None
     ) -> List[int]:
-        """PDFテキストから過去問を抽出"""        
+        """PDFテキストから過去問を抽出（改善版）"""        
         if progress_callback:
             progress_callback("過去問PDFを分析中...", 0.1)
         
@@ -36,27 +36,45 @@ class PastQuestionExtractor:
             progress_callback(f"{len(questions)}問の問題を検出しました", 0.2)
         
         generated_question_ids = []
+        successful_extractions = 0
+        failed_extractions = 0
         
-        for i, question_text in enumerate(questions):
-            # 最初の10問のみ処理（デバッグ用制限）
-            if i >= 10:
-                print(f"⚠️ デバッグモード: 最初の10問のみ処理します")
-                break
-                
+        # 処理する問題数を制限（大量PDFの場合）
+        max_questions = min(len(questions), 20)  # 最大20問まで
+        
+        for i, question_text in enumerate(questions[:max_questions]):
             if progress_callback:
-                progress = 0.2 + (0.7 * (i + 1) / min(len(questions), 10))
-                progress_callback(f"問題 {i+1}/{min(len(questions), 10)} を処理中...", progress)
+                progress = 0.2 + (0.7 * (i + 1) / max_questions)
+                progress_callback(f"問題 {i+1}/{max_questions} を処理中...", progress)
                 
-            try:                # OpenAI APIで構造化抽出
+            try:
                 print(f"📋 問題{i+1}を処理中... (長さ: {len(question_text)}文字)")
                 
-                # デバッグ: 問題テキストの最初の300文字を表示
-                preview_text = question_text[:300].replace('\n', ' ')
+                # テキストが非常に長い場合は最初の1500文字のみ使用
+                if len(question_text) > 1500:
+                    truncated_text = question_text[:1500]
+                    print(f"⚠️ テキストを1500文字に切り詰めました")
+                else:
+                    truncated_text = question_text
+                
+                # デバッグ: 問題テキストの最初の200文字を表示
+                preview_text = truncated_text[:200].replace('\n', ' ')
                 print(f"   テキストプレビュー: {preview_text}...")
                 
-                # 短時間でのAPI呼び出し試行
+                # OpenAI APIで構造化抽出（タイムアウト付き）
+                extracted_data = None
                 try:
-                    extracted_data = self._extract_question_structure(question_text)
+                    import time
+                    start_time = time.time()
+                    extracted_data = self._extract_question_structure(truncated_text)
+                    elapsed = time.time() - start_time
+                    print(f"⏱️ API処理時間: {elapsed:.2f}秒")
+                    
+                    # 30秒以上かかった場合は異常とみなす
+                    if elapsed > 30:
+                        print(f"⚠️ API処理時間が異常に長いです: {elapsed:.2f}秒")
+                        extracted_data = None
+                        
                 except Exception as api_error:
                     print(f"⚠️ API呼び出しエラー: {api_error}")
                     extracted_data = None
@@ -65,11 +83,13 @@ class PastQuestionExtractor:
                 
                 # API失敗の場合は即座にフォールバックを使用
                 if not extracted_data:
-                    print(f"⚠️ API抽出失敗 - フォールバック抽出を実行します")
-                    extracted_data = self._fallback_extraction(question_text)
+                    print(f"🔄 フォールバック抽出を実行します")
+                    extracted_data = self._fallback_extraction(truncated_text)
                 
                 if extracted_data:
                     print(f"✅ 問題{i+1}: 抽出成功")
+                    successful_extractions += 1
+                    
                     # データベースに保存
                     question_id = self._save_extracted_question(
                         extracted_data, 
@@ -84,20 +104,30 @@ class PastQuestionExtractor:
                         print(f"❌ 問題{i+1}: DB保存失敗")
                 else:
                     print(f"❌ 問題{i+1}: 抽出失敗 - データが不正またはAPI応答なし")
+                    failed_extractions += 1
                         
             except Exception as e:
                 print(f"❌ 問題{i+1}の処理でエラー: {e}")
                 import traceback
                 print(f"   詳細: {traceback.format_exc()}")
+                failed_extractions += 1
                 continue
         
+        # 結果サマリー
+        print(f"\n📊 抽出結果サマリー:")
+        print(f"   ✅ 成功: {successful_extractions}問")
+        print(f"   ❌ 失敗: {failed_extractions}問")
+        print(f"   💾 DB保存: {len(generated_question_ids)}問")
+        
         if progress_callback:
-            progress_callback("過去問抽出完了", 1.0)
+            progress_callback(f"過去問抽出完了: {successful_extractions}問成功", 1.0)
         
         return generated_question_ids
 
     def _split_into_questions(self, text: str) -> List[str]:
         """テキストを問題単位に分割（改善版）"""
+        
+        print(f"🔍 テキスト分割開始: 総文字数 {len(text)}")
         
         # より多様な問題番号パターンを検索
         patterns = [
@@ -105,15 +135,18 @@ class PastQuestionExtractor:
             r'問題?\s*(\d+)[.．)\s]',      # 問題1. 問題１） など
             r'第\s*(\d+)\s*問[.．\s]',     # 第1問. など
             r'Q\s*(\d+)[.．)\s]',          # Q1. Q1) など
-            r'(\d+)[.．)\s]',              # 1. 1) など
+            r'(\d+)[.．\s]',               # 1. など（より厳しく）
         ]
         
         best_questions = []
         max_questions = 0
+        best_pattern = None
         
         # 各パターンを試して、最も多くの問題を検出できるパターンを選択
         for pattern in patterns:
             matches = list(re.finditer(pattern, text, re.IGNORECASE))
+            print(f"   パターン '{pattern}': {len(matches)}個のマッチ")
+            
             if len(matches) >= 2:  # 2問以上見つかった場合
                 questions = []
                 for i, match in enumerate(matches):
@@ -121,59 +154,99 @@ class PastQuestionExtractor:
                     end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(text)
                     
                     question_text = text[start_pos:end_pos].strip()
-                    if len(question_text) > 100:  # 最小限の長さチェック（より厳しく）
+                    
+                    # 最小限の長さチェック（50文字以上で選択肢がある）
+                    if (len(question_text) > 50 and 
+                        ('①' in question_text or 'A.' in question_text or 
+                         '1.' in question_text or '解説' in question_text)):
                         questions.append(question_text)
                 
                 if len(questions) > max_questions:
                     max_questions = len(questions)
                     best_questions = questions
-                    print(f"🔍 パターン '{pattern}' で {len(questions)}問を検出")
+                    best_pattern = pattern
+                    print(f"🎯 ベストパターン更新: '{pattern}' で {len(questions)}問を検出")
         
-        # 問題が見つからない場合、段落分割を試行
+        # 問題が見つからない場合、より柔軟な分割を試行
         if not best_questions:
-            print("🔄 問題番号パターンが見つからないため、段落分割を試行します")
+            print("🔄 問題番号パターンが見つからないため、キーワード分割を試行します")
+            
+            # キーワードベースの分割
+            split_keywords = ['問題', '【問', 'Q.', 'Question', '設問']
+            for keyword in split_keywords:
+                parts = text.split(keyword)
+                if len(parts) > 2:
+                    questions_from_keyword = []
+                    for i, part in enumerate(parts[1:], 1):  # 最初の部分はスキップ
+                        question_text = (keyword + part).strip()
+                        if (len(question_text) > 100 and 
+                            ('①' in question_text or 'A.' in question_text)):
+                            questions_from_keyword.append(question_text)
+                    
+                    if len(questions_from_keyword) > len(best_questions):
+                        best_questions = questions_from_keyword
+                        print(f"📄 キーワード '{keyword}' で {len(questions_from_keyword)}問を検出")
+        
+        # それでも見つからない場合、段落分割を試行
+        if not best_questions:
+            print("🔄 段落分割を試行します")
             paragraphs = re.split(r'\n\s*\n', text)
             for p in paragraphs:
                 p = p.strip()
-                if len(p) > 200 and ('?' in p or '？' in p or 'A.' in p or 'A.' in p):
+                if (len(p) > 200 and 
+                    ('?' in p or '？' in p or '①' in p or 'A.' in p) and
+                    ('解説' in p or '正解' in p)):
                     best_questions.append(p)
             
             print(f"📄 段落分割で {len(best_questions)}問を検出")
         
-        print(f"✅ 最終分割結果: {len(best_questions)}問")
-        return best_questions
+        # 最終的にフィルタリング（質の向上）
+        filtered_questions = []
+        for i, q in enumerate(best_questions):
+            # より厳格な品質チェック
+            has_choices = ('①' in q or 'A.' in q or '1.' in q)
+            has_content = len(q.strip()) > 30
+            not_too_long = len(q) < 5000  # 非常に長いものは除外
+            
+            if has_choices and has_content and not_too_long:
+                filtered_questions.append(q)
+            else:
+                print(f"   問題{i+1}をフィルタリング: 品質基準を満たさず")
+        
+        print(f"✅ 最終分割結果: {len(filtered_questions)}問 (パターン: {best_pattern})")
+        
+        # 最初の3問の詳細情報を表示
+        for i, q in enumerate(filtered_questions[:3]):
+            print(f"   問題{i+1}: {len(q)}文字, プレビュー: {q[:80].replace(chr(10), ' ')}...")
+        
+        return filtered_questions
 
     def _extract_question_structure(self, question_text: str) -> Optional[Dict]:
-        """OpenAI APIで問題構造を抽出（改善版）"""        
-        # 入力テキストが長すぎる場合は切り詰める（トークン制限対策）
-        max_input_length = 2000  # 約500トークン相当
+        """OpenAI APIで問題構造を抽出（改善版）"""          # 入力テキストが長すぎる場合は切り詰める（トークン制限対策）
+        max_input_length = 1500  # より小さく設定
         if len(question_text) > max_input_length:
             question_text = question_text[:max_input_length] + "..."
             print(f"⚠️ 入力テキストを{max_input_length}文字に切り詰めました")
-        
-        # シンプルなプロンプト
+          # より短いプロンプト
         prompt = f"""
-以下のテキストから問題を抽出してJSONで返してください。
+問題テキストから選択肢問題を抽出してください:
 
-テキスト:
 {question_text}
 
-以下の形式のJSONで返してください:
+JSON形式で回答:
 {{
-    "title": "問題タイトル（20文字以内）",
+    "title": "問題タイトル",
     "question": "問題文",
     "choices": [
-        {{"text": "選択肢A", "is_correct": false}},
-        {{"text": "選択肢B", "is_correct": false}},
-        {{"text": "選択肢C", "is_correct": false}},
-        {{"text": "選択肢D", "is_correct": true}}
+        {{"text": "選択肢1", "is_correct": false}},
+        {{"text": "選択肢2", "is_correct": true}},
+        {{"text": "選択肢3", "is_correct": false}},
+        {{"text": "選択肢4", "is_correct": false}}
     ],
-    "explanation": "解説",
-    "difficulty": "medium"
+    "explanation": "解説"
 }}
 
-重要: JSONのみ返してください。他の文章は不要です。
-"""
+JSONのみ返してください。"""
         try:
             print(f"🚀 OpenAI API呼び出し開始")
             print(f"   プロンプト長: {len(prompt)} 文字")

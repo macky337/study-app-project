@@ -80,7 +80,8 @@ class EnhancedOpenAIService:
                     ],
                     max_tokens=1500,
                     temperature=0.7,
-                    response_format={"type": "json_object"},                    # プライバシー保護: データの学習を無効化
+                    response_format={"type": "json_object"},
+                    # プライバシー保護: データの学習を無効化
                     extra_headers={
                         "X-OpenAI-Skip-Training": "true"
                     }
@@ -272,7 +273,8 @@ class EnhancedOpenAIService:
                         {"role": "user", "content": prompt}
                     ],
                     max_tokens=max_tokens,
-                    temperature=temperature,                    # プライバシー保護: PDFデータの学習を無効化
+                    temperature=temperature,
+                    # プライバシー保護: PDFデータの学習を無効化
                     extra_headers={
                         "X-OpenAI-Skip-Training": "true"
                     }
