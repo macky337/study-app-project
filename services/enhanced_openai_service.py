@@ -281,7 +281,7 @@ class EnhancedOpenAIService:
                 )
                 
                 # プライバシー保護の確認ログ  
-                print("🔒 プライバシー保護: OpenAI学習無効化ヘッダー送信完了 (汎用API)")
+                print("プライバシー保護: OpenAI学習無効化ヘッダー送信完了 (汎用API)")
                 
                 return response.choices[0].message.content
                 
@@ -296,18 +296,18 @@ class EnhancedOpenAIService:
                     return None
                     
             except openai.APIError as e:
-                print(f"❌ OpenAI API error on attempt {attempt + 1}: {e}")
+                print(f"ERROR: OpenAI API error on attempt {attempt + 1}: {e}")
                 print(f"   エラータイプ: {type(e).__name__}")
                 print(f"   エラー詳細: {str(e)}")
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay)
                     continue
                 else:
-                    print(f"❌ OpenAI API error after {self.max_retries} attempts: {e}")
+                    print(f"ERROR: OpenAI API error after {self.max_retries} attempts: {e}")
                     return None
                     
             except json.JSONDecodeError as e:
-                print(f"❌ JSON decode error on attempt {attempt + 1}: {e}")
+                print(f"ERROR: JSON decode error on attempt {attempt + 1}: {e}")
                 print(f"   JSON解析失敗の可能性があります")
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay)
@@ -316,7 +316,7 @@ class EnhancedOpenAIService:
                     return None
                     
             except Exception as e:
-                print(f"❌ Unexpected error on attempt {attempt + 1}: {e}")
+                print(f"ERROR: Unexpected error on attempt {attempt + 1}: {e}")
                 print(f"   エラータイプ: {type(e).__name__}")
                 import traceback
                 print(f"   スタックトレース: {traceback.format_exc()}")
@@ -338,9 +338,9 @@ def test_enhanced_openai_service():
         
         # Test connection
         if service.test_connection():
-            print("✅ API connection successful")
+            print("OK: API connection successful")
         else:
-            print("❌ API connection failed")
+            print("ERROR: API connection failed")
             return
         
         # Test question generation
@@ -351,15 +351,15 @@ def test_enhanced_openai_service():
         )
         
         if question:
-            print("✅ Question generation successful")
+            print("OK: Question generation successful")
             print(f"Title: {question.title}")
             print(f"Category: {question.category}")
             print(f"Difficulty: {question.difficulty}")
         else:
-            print("❌ Question generation failed")
+            print("ERROR: Question generation failed")
             
     except Exception as e:
-        print(f"❌ Test failed: {e}")
+        print(f"ERROR: Test failed: {e}")
 
 
 if __name__ == "__main__":
