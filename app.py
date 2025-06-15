@@ -785,7 +785,6 @@ elif page == "🔧 問題管理":
                                 - 問題番号で自動分割を試行
                                 - 抽出精度を向上させるため低温度設定を使用
                                 """)
-                                
                                 preview_text = st.checkbox("テキスト抽出結果をプレビュー", value=True, key="past_preview")
                                 
                                 strict_extraction = st.checkbox(
@@ -793,18 +792,25 @@ elif page == "🔧 問題管理":
                                     value=True, 
                                     help="より正確な抽出のため、温度設定を最低にします"
                                 )
-                                # 過去問抽出実行
+                            
+                            # 過去問抽出実行
                             st.markdown("---")
                             button_label = "📝 PDFから過去問を抽出"
-                          # プライバシー保護の確認チェック
-                        if processing_mode == "🤖 問題生成モード":
-                            privacy_confirmed = st.session_state.get("privacy_confirmation_gen", False)
-                        else:
-                            privacy_confirmed = st.session_state.get("privacy_confirmation", False)
-                        
-                        if st.button(button_label, type="primary", use_container_width=True, disabled=not privacy_confirmed):
                             
-                            if not privacy_confirmed:
+                            # プライバシー保護の確認（過去問抽出モード）
+                            privacy_confirmed = st.checkbox(
+                                "🔒 プライバシー保護設定を理解し、PDFの処理に同意します",
+                                help="アップロードされたPDFの内容はOpenAIの学習データとして使用されません。処理完了後、内容はメモリから削除されます。",
+                                key="privacy_confirmation"
+                            )                        # プライバシー保護確認の統一処理
+                        if processing_mode == "🤖 問題生成モード":
+                            privacy_check = st.session_state.get("privacy_confirmation_gen", False)
+                        else:
+                            privacy_check = st.session_state.get("privacy_confirmation", False)
+                          
+                        if st.button(button_label, type="primary", use_container_width=True, disabled=not privacy_check):
+                            
+                            if not privacy_check:
                                 st.warning("⚠️ プライバシー保護設定への同意が必要です。")
                                 st.stop()
                             
