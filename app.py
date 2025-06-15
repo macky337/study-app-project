@@ -14,43 +14,56 @@ st.set_page_config(
 DATABASE_AVAILABLE = False
 DATABASE_ERROR = None
 
+# Mock functions for demo mode
+def generate_session_id():
+    return "demo_session"
+
+def format_accuracy(correct, total):
+    if total == 0:
+        return "0%"
+    return f"{(correct/total)*100:.1f}%"
+
+def get_difficulty_emoji(difficulty):
+    emoji_map = {"easy": "🟢", "medium": "🟡", "hard": "🔴"}
+    return emoji_map.get(difficulty, "🟡")
+
 try:
     print("🔍 Initializing database connection...")
     from sqlmodel import Session
     from database.connection import engine, DATABASE_URL
     
-    if engine is None:
-        raise Exception("Database engine could not be created. Check DATABASE_URL.")
-    
-    print("✅ Database engine created successfully")
-    
-    from database.operations import QuestionService, ChoiceService, UserAnswerService
-    from services.question_generator import QuestionGenerator
-    from services.pdf_processor import PDFProcessor
-    from services.pdf_question_generator import PDFQuestionGenerator
-    from services.past_question_extractor import PastQuestionExtractor
-    from utils.helpers import generate_session_id, format_accuracy, get_difficulty_emoji
-    
-    DATABASE_AVAILABLE = True
-    print("✅ All modules imported successfully")
-    
+    if engine is not None:
+        print("✅ Database engine created successfully")
+        
+        from database.operations import QuestionService, ChoiceService, UserAnswerService
+        from services.question_generator import QuestionGenerator
+        from services.pdf_processor import PDFProcessor
+        from services.pdf_question_generator import PDFQuestionGenerator
+        from services.past_question_extractor import PastQuestionExtractor
+        from utils.helpers import generate_session_id as real_generate_session_id, format_accuracy as real_format_accuracy, get_difficulty_emoji as real_get_difficulty_emoji
+        
+        # Override with real functions
+        generate_session_id = real_generate_session_id
+        format_accuracy = real_format_accuracy
+        get_difficulty_emoji = real_get_difficulty_emoji
+        
+        DATABASE_AVAILABLE = True
+        print("✅ All modules imported successfully")
+    else:
+        print("⚠️ Database engine is None, running in demo mode")
+        DATABASE_ERROR = "Database engine could not be created"
+        
 except ImportError as e:
     DATABASE_ERROR = f"Module import error: {str(e)}"
     DATABASE_AVAILABLE = False
     print(f"❌ Import error: {e}")
-    
-    # Create mock function for demo
-    def generate_session_id():
-        return "demo_session"
+    print("Running in demo mode without database functionality")
         
 except Exception as e:
     DATABASE_ERROR = f"Database connection error: {str(e)}"
     DATABASE_AVAILABLE = False
     print(f"❌ Database connection error: {e}")
-    
-    # Create mock function for demo
-    def generate_session_id():
-        return "demo_session"
+    print("Running in demo mode without database functionality")
 
 # データベースエラーがある場合は警告を表示
 if DATABASE_ERROR:
