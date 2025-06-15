@@ -9,8 +9,7 @@ import sys
 import os
 from datetime import datetime
 
-def run_command(command, description):
-    """コマンドを実行し、結果を表示"""
+def run_command(command, description):    """コマンドを実行し、結果を表示"""
     print(f"\n🔄 {description}")
     print(f"実行: {command}")
     print("-" * 50)
@@ -21,6 +20,8 @@ def run_command(command, description):
             shell=True, 
             capture_output=True, 
             text=True,
+            encoding='utf-8',
+            errors='replace',  # デコードエラーを無視して置換
             cwd=os.path.dirname(os.path.abspath(__file__))
         )
         
