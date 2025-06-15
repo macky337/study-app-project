@@ -2,7 +2,7 @@ from typing import Optional
 from sqlmodel import SQLModel, Field, Relationship
 
 
-class Choice(SQLModel, table=True):
+class Choice(SQLModel, table=True, extend_existing=True):
     """選択肢テーブル"""
     id: Optional[int] = Field(primary_key=True)
     question_id: int = Field(foreign_key="question.id")

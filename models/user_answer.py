@@ -3,7 +3,7 @@ from typing import Optional
 from sqlmodel import SQLModel, Field, Relationship
 
 
-class UserAnswer(SQLModel, table=True):
+class UserAnswer(SQLModel, table=True, extend_existing=True):
     """ユーザー回答履歴テーブル"""
     id: Optional[int] = Field(primary_key=True)
     question_id: int = Field(foreign_key="question.id")

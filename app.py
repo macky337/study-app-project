@@ -2,28 +2,39 @@ import streamlit as st
 import time
 from datetime import datetime
 
-# Database connection with error handling
-try:
-    from sqlmodel import Session
-    from database.connection import engine, DATABASE_URL
-    from database.operations import QuestionService, ChoiceService, UserAnswerService
-    from services.question_generator import QuestionGenerator
-    from utils.helpers import generate_session_id, format_accuracy, get_difficulty_emoji
-    DATABASE_AVAILABLE = engine is not None
-except Exception as e:
-    st.error(f"⚠️ Database connection failed: {e}")
-    DATABASE_AVAILABLE = False
-    # Create mock functions for demo
-    def generate_session_id():
-        return "demo_session"
-
-# ページ設定
+# ページ設定（最初に実行する必要がある）
 st.set_page_config(
     page_title="Study Quiz App",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Database connection with error handling
+DATABASE_AVAILABLE = False
+DATABASE_ERROR = None
+
+try:
+    from sqlmodel import Session
+    from database.connection import engine, DATABASE_URL
+    from database.operations import QuestionService, ChoiceService, UserAnswerService
+    from services.question_generator import QuestionGenerator
+    from utils.helpers import generate_session_id, format_accuracy, get_difficulty_emoji
+    
+    DATABASE_AVAILABLE = engine is not None
+    
+except Exception as e:
+    DATABASE_ERROR = str(e)
+    DATABASE_AVAILABLE = False
+    print(f"❌ Database connection error: {e}")
+    
+    # Create mock functions for demo
+    def generate_session_id():
+        return "demo_session"
+
+# データベースエラーがある場合は警告を表示
+if DATABASE_ERROR:
+    st.error(f"⚠️ Database connection failed: {DATABASE_ERROR}")
 
 # セッション状態の初期化
 if 'session_id' not in st.session_state:
@@ -49,13 +60,27 @@ st.markdown("資格試験対策用のクイズ学習アプリ")
 # サイドバーに基本的なナビゲーションを追加
 with st.sidebar:
     st.header("📚 メニュー")
+    
+    # ページ選択状態を管理
+    if 'page' not in st.session_state:
+        st.session_state.page = "🏠 ホーム"
+    
     page = st.selectbox(
         "ページを選択",
-        ["🏠 ホーム", "🎲 クイズ", "📊 統計", "🔧 問題管理", "⚙️ 設定"]
+        ["🏠 ホーム", "🎲 クイズ", "📊 統計", "🔧 問題管理", "⚙️ 設定"],
+        index=["🏠 ホーム", "🎲 クイズ", "📊 統計", "🔧 問題管理", "⚙️ 設定"].index(st.session_state.page),
+        key="page_selector"
     )
+      # ページが変更された場合、セッション状態を更新
+    if page != st.session_state.page:
+        st.session_state.page = page
+        st.rerun()
     
     st.markdown("---")
     st.markdown(f"**セッションID:** `{st.session_state.session_id[-8:]}`")
+
+# 現在のページを取得
+page = st.session_state.page
 
 # データベースセッションを取得する関数
 @st.cache_resource
@@ -113,8 +138,7 @@ if page == "🏠 ホーム":
                     
                     # 問題数を取得
                     total_questions = len(question_service.get_random_questions(limit=1000))
-                    
-                    # セッション統計を取得
+                      # セッション統計を取得
                     stats = user_answer_service.get_user_stats(st.session_state.session_id)
                     
                     st.markdown("### 📊 統計情報")
@@ -126,10 +150,10 @@ if page == "🏠 ホーム":
                         st.metric("回答済み", stats['total'])
                     with col1_3:
                         st.metric("正答率", f"{stats['accuracy']}%")
-                        
             except Exception as e:
                 st.error(f"データベース接続エラー: {e}")
-        else:            st.warning("⚠️ データベースに接続できません")
+        else:
+            st.warning("⚠️ データベースに接続できません")
     
     with col2:
         st.markdown("### 🚀 クイズを開始")
@@ -139,7 +163,8 @@ if page == "🏠 ホーム":
             st.session_state.user_answer = None
             # 回答済み問題リストをクリア（新しいクイズセッション開始）
             st.session_state.answered_questions.clear()
-            st.success("サイドバーから「🎲 クイズ」を選択してください！")
+            st.session_state.page = "🎲 クイズ"  # ページを直接切り替え
+            st.rerun()
 
 elif page == "🎲 クイズ":
     st.subheader("🎲 クイズモード")
@@ -152,8 +177,7 @@ elif page == "🎲 クイズ":
         with get_database_session() as session:
             question_service = QuestionService(session)
             choice_service = ChoiceService(session)
-            user_answer_service = UserAnswerService(session)
-              # 新しい問題を取得
+            user_answer_service = UserAnswerService(session)            # 新しい問題を取得
             if st.session_state.current_question is None:
                 # 既に回答した問題を除外して取得
                 max_attempts = 10
@@ -185,7 +209,8 @@ elif page == "🎲 クイズ":
                     st.session_state.user_answer = None
                     st.session_state.show_result = False
                     st.session_state.start_time = time.time()
-                    st.session_state.quiz_choice_key += 1  # ラジオボタンのキーを更新                else:
+                    st.session_state.quiz_choice_key += 1  # ラジオボタンのキーを更新
+                else:
                     st.error("問題が見つかりません。")
                     st.stop()
             
@@ -199,11 +224,11 @@ elif page == "🎲 クイズ":
             st.markdown(f"### {get_difficulty_emoji(question.difficulty)} {question.title}")
             st.markdown(f"**カテゴリ:** {question.category}")
             st.markdown(f"**問題:** {question.content}")
-            
-            # 選択肢を取得
+              # 選択肢を取得
             choices = choice_service.get_choices_by_question(question.id)
             
-            if not st.session_state.show_result:                # 回答フェーズ
+            if not st.session_state.show_result:
+                # 回答フェーズ
                 st.markdown("---")
                 st.markdown("**選択肢を選んでください:**")
                 
@@ -224,7 +249,8 @@ elif page == "🎲 クイズ":
                         
                         selected_choice = choices[selected_idx]
                         is_correct = selected_choice.is_correct
-                          # 回答を記録
+                        
+                        # 回答を記録
                         user_answer_service.record_answer(
                             question_id=question.id,
                             selected_choice_id=selected_choice.id,
@@ -232,7 +258,8 @@ elif page == "🎲 クイズ":
                             answer_time=answer_time,
                             session_id=st.session_state.session_id
                         )
-                          # 回答済み問題に追加
+                        
+                        # 回答済み問題に追加
                         st.session_state.answered_questions.add(question.id)
                         
                         st.session_state.user_answer = {
@@ -268,9 +295,9 @@ elif page == "🎲 クイズ":
                 if question.explanation:
                     st.markdown(f"**💡 解説:** {question.explanation}")
                 
-                # 回答時間表示
-                st.markdown(f"**⏱️ 回答時間:** {user_answer['answer_time']:.1f}秒")
-                  # 次の問題ボタン
+                # 回答時間表示                st.markdown(f"**⏱️ 回答時間:** {user_answer['answer_time']:.1f}秒")
+                
+                # 次の問題ボタン
                 col1, col2 = st.columns([1, 1])
                 with col1:
                     if st.button("➡️ 次の問題", use_container_width=True):
@@ -284,7 +311,8 @@ elif page == "🎲 クイズ":
                     if st.button("🏠 ホームに戻る", use_container_width=True):
                         st.session_state.current_question = None
                         st.session_state.show_result = False
-                        st.success("サイドバーから「🏠 ホーム」を選択してください！")
+                        st.session_state.page = "🏠 ホーム"  # ページを直接切り替え
+                        st.rerun()
     
     except Exception as e:
         st.error(f"クイズ機能でエラーが発生しました: {e}")
@@ -498,11 +526,26 @@ elif page == "🔧 問題管理":
                         
                         try:
                             generator = QuestionGenerator(session)
-                            
-                            # OpenAI接続確認
+                              # OpenAI接続確認
                             connection_status = generator.validate_openai_connection()
                             if not connection_status["connected"]:
-                                st.error(f"❌ OpenAI接続エラー: {connection_status['message']}")
+                                error_message = connection_status['message']
+                                
+                                # クォータ超過エラーの場合、詳細な説明を追加
+                                if "quota" in error_message.lower() or "insufficient_quota" in error_message.lower():
+                                    st.error("❌ **OpenAI APIクォータ超過エラー**")
+                                    st.markdown("""
+                                    🔧 **解決方法:**
+                                    1. **[OpenAI Platform](https://platform.openai.com)**にログイン
+                                    2. **Billing**セクションで使用量とクレジット残高を確認
+                                    3. 必要に応じてクレジットを追加購入
+                                    4. または、無料クォータがリセットされるまで待機
+                                    
+                                    💡 **代替案:** 手動で問題を作成することも可能です（問題管理ページから）
+                                    """)
+                                else:
+                                    st.error(f"❌ OpenAI接続エラー: {error_message}")
+                                    st.info("💡 **ヒント:** OpenAI APIキーが正しく設定されているか確認してください")
                                 st.stop()
                             
                             generated_ids = []
@@ -657,6 +700,134 @@ elif page == "⚙️ 設定":
                 st.error(f"データベース情報の取得に失敗: {e}")
         else:
             st.error("データベースに接続できません")
+
+    # データベース初期化セクション
+    st.markdown("---")
+    st.markdown("### 🗄️ データベース管理")
+    
+    if DATABASE_AVAILABLE:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**データベース初期化**")
+            if st.button("📝 サンプルデータ作成", help="データベースが空の場合にサンプル問題を作成します"):
+                try:
+                    with get_database_session() as session:
+                        question_service = QuestionService(session)
+                        choice_service = ChoiceService(session)
+                        
+                        # 既存の問題数をチェック
+                        existing_questions = question_service.get_random_questions(limit=1000)
+                        
+                        if len(existing_questions) > 0:
+                            st.warning(f"⚠️ 既に{len(existing_questions)}問の問題が存在します。")
+                            if st.button("🔄 強制的にサンプルデータを追加"):
+                                create_sample = True
+                            else:
+                                create_sample = False
+                        else:
+                            create_sample = True
+                        
+                        if create_sample:
+                            with st.spinner("サンプルデータを作成中..."):
+                                # サンプル問題1
+                                q1 = question_service.create_question(
+                                    title="プログラミング基礎 - 変数",
+                                    content="Pythonで変数xに数値10を代入する正しい記述はどれですか？",
+                                    category="プログラミング基礎",
+                                    explanation="Pythonでは「変数名 = 値」の形式で代入を行います。",
+                                    difficulty="easy"
+                                )
+                                
+                                choice_service.create_choice(q1.id, "x = 10", True, 1)
+                                choice_service.create_choice(q1.id, "x == 10", False, 2)
+                                choice_service.create_choice(q1.id, "x := 10", False, 3)
+                                choice_service.create_choice(q1.id, "10 = x", False, 4)
+                                
+                                # サンプル問題2
+                                q2 = question_service.create_question(
+                                    title="基本情報技術者 - データベース",
+                                    content="関係データベースにおいて、テーブル間の関連を定義するために使用されるものはどれですか？",
+                                    category="基本情報技術者",
+                                    explanation="外部キーは、他のテーブルの主キーを参照して、テーブル間の関連を定義します。",
+                                    difficulty="medium"
+                                )
+                                
+                                choice_service.create_choice(q2.id, "主キー", False, 1)
+                                choice_service.create_choice(q2.id, "外部キー", True, 2)
+                                choice_service.create_choice(q2.id, "インデックス", False, 3)
+                                choice_service.create_choice(q2.id, "ビュー", False, 4)
+                                
+                                # サンプル問題3
+                                q3 = question_service.create_question(
+                                    title="ネットワーク - TCP/IP",
+                                    content="インターネットで使用される基本的なプロトコルスイートは何ですか？",
+                                    category="ネットワーク",
+                                    explanation="TCP/IPは、インターネットで使用される基本的なプロトコルスイートです。",
+                                    difficulty="easy"
+                                )
+                                
+                                choice_service.create_choice(q3.id, "HTTP", False, 1)
+                                choice_service.create_choice(q3.id, "FTP", False, 2)
+                                choice_service.create_choice(q3.id, "TCP/IP", True, 3)
+                                choice_service.create_choice(q3.id, "SMTP", False, 4)
+                                
+                                # サンプル問題4
+                                q4 = question_service.create_question(
+                                    title="セキュリティ - 暗号化",
+                                    content="公開鍵暗号方式において、データの暗号化に使用されるキーはどれですか？",
+                                    category="セキュリティ",
+                                    explanation="公開鍵暗号方式では、公開鍵で暗号化し、秘密鍵で復号化します。",
+                                    difficulty="hard"
+                                )
+                                
+                                choice_service.create_choice(q4.id, "秘密鍵", False, 1)
+                                choice_service.create_choice(q4.id, "公開鍵", True, 2)
+                                choice_service.create_choice(q4.id, "共通鍵", False, 3)
+                                choice_service.create_choice(q4.id, "ハッシュ値", False, 4)
+                                
+                                # サンプル問題5
+                                q5 = question_service.create_question(
+                                    title="データベース - SQL",
+                                    content="SQLにおいて、テーブルからデータを検索するために使用するコマンドはどれですか？",
+                                    category="データベース",
+                                    explanation="SELECT文は、データベースからデータを検索・取得するためのSQL文です。",
+                                    difficulty="easy"
+                                )
+                                
+                                choice_service.create_choice(q5.id, "INSERT", False, 1)
+                                choice_service.create_choice(q5.id, "UPDATE", False, 2)
+                                choice_service.create_choice(q5.id, "SELECT", True, 3)
+                                choice_service.create_choice(q5.id, "DELETE", False, 4)
+                                
+                            st.success("✅ サンプルデータを5問作成しました！")
+                            st.info("🎲 クイズページでテストしてみてください。")
+                            
+                except Exception as e:
+                    st.error(f"❌ サンプルデータ作成に失敗: {e}")
+        
+        with col2:
+            st.markdown("**データベース状態**")
+            try:
+                with get_database_session() as session:
+                    question_service = QuestionService(session)
+                    questions = question_service.get_random_questions(limit=1000)
+                    
+                    if len(questions) == 0:
+                        st.warning("⚠️ データベースに問題がありません")
+                        st.info("👈 左側の「サンプルデータ作成」ボタンでテスト用の問題を作成してください")
+                    else:
+                        st.success(f"✅ {len(questions)}問の問題が利用可能")
+                        
+                        # 最新の問題を表示
+                        st.markdown("**最新の問題:**")
+                        for i, q in enumerate(questions[-3:]):
+                            st.text(f"• {q.title}")
+                            
+            except Exception as e:
+                st.error(f"データベース状態確認エラー: {e}")
+    else:
+        st.error("⚠️ データベースに接続できません")
 
 # フッター
 st.markdown("---")

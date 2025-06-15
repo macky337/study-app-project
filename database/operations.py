@@ -1,5 +1,5 @@
 from typing import List, Optional
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
 from models import Question, Choice, UserAnswer
 
 
@@ -41,7 +41,7 @@ class QuestionService:
     
     def get_random_questions(self, limit: int = 10) -> List[Question]:
         """ランダムに問題を取得"""
-        statement = select(Question).limit(limit)
+        statement = select(Question).order_by(func.random()).limit(limit)
         return self.session.exec(statement).all()
     
     def update_question(

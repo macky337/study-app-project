@@ -3,7 +3,7 @@ from typing import List, Optional
 from sqlmodel import SQLModel, Field, Relationship
 
 
-class Question(SQLModel, table=True):
+class Question(SQLModel, table=True, extend_existing=True):
     """問題テーブル"""
     id: Optional[int] = Field(primary_key=True)
     title: str = Field(index=True)  # 問題のタイトル
