@@ -256,21 +256,47 @@ elif page == "🎲 クイズ":
             # 問題表示
             st.markdown(f"### {get_difficulty_emoji(question.difficulty)} {question.title}")
             st.markdown(f"**カテゴリ:** {question.category}")
-            st.markdown(f"**問題:** {question.content}")
-              # 選択肢を取得
+            st.markdown(f"**問題:** {question.content}")            # 選択肢を取得
             choices = choice_service.get_choices_by_question(question.id)
+              # 選択肢が存在しない場合のエラーハンドリング
+            if not choices:
+                st.error("❌ この問題の選択肢が見つかりません。")
+                st.info("🔧 問題データに不具合があります。管理者にお知らせください。")
+                st.code(f"問題ID: {question.id}, タイトル: {question.title}")
+                
+                # 次の問題を表示するボタン
+                if st.button("➡️ 次の問題へ", use_container_width=True):
+                    st.session_state.answered_questions.add(question.id)
+                    st.session_state.current_question = None
+                    st.session_state.show_result = False
+                    st.session_state.quiz_choice_key += 1
+                    st.rerun()
+                st.stop()  # return の代わりに st.stop() を使用
+            
+            print(f"INFO: 問題ID {question.id} の選択肢数: {len(choices)}")  # デバッグログ
             
             if not st.session_state.show_result:
                 # 回答フェーズ
                 st.markdown("---")
                 st.markdown("**選択肢を選んでください:**")
                 
+                # デバッグ情報表示（開発時のみ）
+                if len(choices) == 0:
+                    st.error("選択肢データが取得できません")
+                    st.stop()
+                
                 choice_labels = [f"{chr(65+i)}. {choice.content}" for i, choice in enumerate(choices)]
+                print(f"DEBUG: 選択肢ラベル: {choice_labels}")  # デバッグログ
+                
+                # 選択肢が空でないことを確認
+                if not choice_labels:
+                    st.error("選択肢の生成に失敗しました")
+                    st.stop()
                 
                 selected_idx = st.radio(
                     "回答を選択:",
                     range(len(choices)),
-                    format_func=lambda x: choice_labels[x],
+                    format_func=lambda x: choice_labels[x] if x < len(choice_labels) else "エラー",
                     key=f"quiz_choice_{st.session_state.quiz_choice_key}"
                 )
                 
@@ -862,26 +888,49 @@ elif page == "🔧 問題管理":
                             
                             # プログレス表示
                             progress_bar = st.progress(0)
-                            status_text = st.empty()                            
+                            status_text = st.empty()
+                            
                             try:
                                 # プライバシー保護の確認表示
-                                st.info("🔒 プライバシー保護: OpenAI学習無効化ヘッダーを設定して処理を開始します")
+                                st.info("PRIVACY: OpenAI学習無効化ヘッダーを設定して処理を開始します")
                                 
                                 # PDFテキスト抽出
                                 status_text.text("PDFからテキストを抽出中...")
                                 progress_bar.progress(0.1)
                                 
-                                file_bytes = uploaded_file.read()
+                                try:
+                                    file_bytes = uploaded_file.read()
+                                    if not file_bytes:
+                                        st.error("ERROR: PDFファイルの読み込みに失敗しました")
+                                        st.stop()
+                                        
+                                    st.info(f"INFO: PDFファイルサイズ: {len(file_bytes)} bytes")
+                                    
+                                except Exception as read_error:
+                                    st.error(f"ERROR: ファイル読み込みエラー: {read_error}")
+                                    st.stop()
                                 
-                                if extraction_method == "auto":
-                                    extracted_text = pdf_processor.extract_text_auto(file_bytes)
-                                elif extraction_method == "pypdf2":
-                                    extracted_text = pdf_processor.extract_text_pypdf2(file_bytes)
-                                else:
-                                    extracted_text = pdf_processor.extract_text_pdfplumber(file_bytes)
+                                # テキスト抽出の実行
+                                try:
+                                    if extraction_method == "auto":
+                                        extracted_text = pdf_processor.extract_text_auto(file_bytes)
+                                    elif extraction_method == "pypdf2":
+                                        extracted_text = pdf_processor.extract_text_pypdf2(file_bytes)
+                                    else:
+                                        extracted_text = pdf_processor.extract_text_pdfplumber(file_bytes)
+                                        
+                                    if not extracted_text:
+                                        st.error("ERROR: テキスト抽出結果が空です")
+                                        st.stop()
+                                        
+                                    st.info(f"INFO: 抽出テキスト長: {len(extracted_text)} 文字")
+                                    
+                                except Exception as extract_error:
+                                    st.error(f"ERROR: テキスト抽出エラー: {extract_error}")
+                                    st.stop()
                                 
                                 if not extracted_text or len(extracted_text.strip()) < 50:
-                                    st.error("❌ PDFからテキストを抽出できませんでした。ファイルが画像ベースのPDFまたは保護されている可能性があります。")
+                                    st.error("ERROR: PDFからテキストを抽出できませんでした。ファイルが画像ベースのPDFまたは保護されている可能性があります。")
                                     st.stop()
                                 
                                 # テキストプレビュー
@@ -899,8 +948,7 @@ elif page == "🔧 問題管理":
                                     st.metric("抽出文字数", f"{char_count:,}")
                                 with col2:
                                     st.metric("推定単語数", f"{word_count:,}")
-                                
-                                # プログレスコールバック関数
+                                  # プログレスコールバック関数
                                 def pdf_progress_callback(message, progress):
                                     status_text.text(message)
                                     progress_bar.progress(min(progress, 0.95))
@@ -910,28 +958,114 @@ elif page == "🔧 問題管理":
                                     status_text.text("問題を生成中...")
                                     progress_bar.progress(0.3)
                                     
-                                    generated_ids = pdf_generator.generate_questions_from_pdf(
-                                        text=extracted_text,
-                                        num_questions=pdf_num_questions,
-                                        difficulty=pdf_difficulty,
-                                        category=pdf_category,
-                                        progress_callback=pdf_progress_callback
-                                    )
-                                    
-                                    mode_text = "生成"
+                                    try:
+                                        generated_ids = pdf_generator.generate_questions_from_pdf(
+                                            text=extracted_text,
+                                            num_questions=pdf_num_questions,
+                                            difficulty=pdf_difficulty,
+                                            category=pdf_category,
+                                            progress_callback=pdf_progress_callback
+                                        )
+                                        mode_text = "生成"
+                                        
+                                    except Exception as gen_error:
+                                        st.error(f"ERROR: 問題生成エラー: {gen_error}")
+                                        status_text.text("問題生成に失敗しました")
+                                        progress_bar.empty()
+                                        st.stop()
                                     
                                 else:  # 過去問抽出モード
                                     # 過去問抽出モード
                                     status_text.text("過去問を抽出中...")
                                     progress_bar.progress(0.3)
                                     
-                                    generated_ids = past_extractor.extract_past_questions_from_pdf(
-                                        text=extracted_text,
-                                        category=pdf_category,
-                                        progress_callback=pdf_progress_callback
-                                    )
-                                    
-                                    mode_text = "抽出"
+                                    try:
+                                        generated_ids = past_extractor.extract_past_questions_from_pdf(
+                                            text=extracted_text,
+                                            category=pdf_category,
+                                            progress_callback=pdf_progress_callback
+                                        )
+                                        mode_text = "抽出"
+                                        
+                                    except Exception as extract_error:
+                                        st.error(f"ERROR: 過去問抽出エラー: {extract_error}")
+                                        status_text.text("過去問抽出に失敗しました")
+                                        progress_bar.empty()
+                                        
+                                        # 詳細なエラー診断を表示
+                                        with st.expander("INFO: エラー診断情報", expanded=True):
+                                            st.markdown("### 考えられる原因:")
+                                            
+                                            # APIキーの状態確認
+                                            import os
+                                            api_key = os.getenv("OPENAI_API_KEY")
+                                            if api_key:
+                                                st.success(f"SUCCESS: OpenAI APIキー: 設定済み (sk-proj-...{api_key[-10:]})")
+                                            else:
+                                                st.error("ERROR: OpenAI APIキー: 未設定")
+                                            
+                                            # テキスト統計
+                                            st.markdown(f"**INFO: 抽出されたテキスト長**: {len(extracted_text)} 文字")
+                                            
+                                            # テキスト長の評価
+                                            if len(extracted_text) < 1000:
+                                                st.warning("WARN: テキスト長: 短すぎる可能性があります")
+                                            elif len(extracted_text) > 50000:
+                                                st.warning("WARN: テキスト長: 長すぎる可能性があります")
+                                            else:
+                                                st.success("SUCCESS: テキスト長: 適切な範囲内です")
+                                            
+                                            # 推定単語数
+                                            word_count = len(extracted_text.split())
+                                            st.markdown(f"**INFO: 推定単語数**: {word_count:,}")
+                                            
+                                            # 推奨対処法
+                                            st.markdown("### TIP: 推奨対処法:")
+                                            st.markdown("""
+                                            **API制限の確認:**
+                                            - OpenAI APIの使用量制限を確認
+                                            - レート制限（1分間あたりのリクエスト数）を確認
+                                            
+                                            **PDFの品質確認:**
+                                            - テキストベースのPDF（画像スキャンではない）
+                                            - 問題・選択肢・解説が明確に区別されている
+                                            
+                                            **ネットワーク確認:**
+                                            - インターネット接続が安定している
+                                            - ファイアウォールやプロキシの設定
+                                            
+                                            **再試行:**
+                                            - 少し時間を置いてから再度実行
+                                            - より小さなファイルで試行
+                                            """)
+                                            
+                                            # 抽出テキストのプレビュー
+                                            st.markdown("### INFO: 抽出テキストのプレビュー:")
+                                            preview_text = extracted_text[:2000]
+                                            st.text_area("テキスト内容", preview_text, height=200)
+                                            
+                                            # 検出された問題パターンの分析
+                                            import re
+                                            patterns_found = []
+                                            patterns = [
+                                                (r'【問\s*(\d+)】', '【問1】形式'),
+                                                (r'問題?\s*(\d+)[.．)\s]', '問題1.形式'),
+                                                (r'(\d+)[.．)\s]', '1.形式'),
+                                            ]
+                                            
+                                            for pattern, name in patterns:
+                                                matches = re.findall(pattern, extracted_text, re.IGNORECASE)
+                                                if matches:
+                                                    patterns_found.append(f"SUCCESS: {name}: {len(matches)}箇所")
+                                            
+                                            if patterns_found:
+                                                st.markdown("### INFO: 検出された問題パターン:")
+                                                for pattern in patterns_found:
+                                                    st.markdown(f"- {pattern}")
+                                            else:
+                                                st.warning("WARN: 問題番号パターンが検出されませんでした")
+                                        
+                                        st.stop()
                                 
                                 # 完了
                                 progress_bar.progress(1.0)

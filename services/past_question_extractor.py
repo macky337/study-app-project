@@ -312,11 +312,26 @@ class PastQuestionExtractor:
             cleaned_response = cleaned_response.strip()
             
             print(f"FIX: クリーンアップ後: {cleaned_response[:100]}...")
-            
-            # JSONを解析
+              # JSONを解析
             try:
                 data = json.loads(cleaned_response)
-                print(f"OK: JSON解析成功: {list(data.keys())}")
+                print(f"OK: JSON解析成功: {type(data).__name__}")
+                
+                # APIがlistを返した場合の処理
+                if isinstance(data, list):
+                    if len(data) > 0 and isinstance(data[0], dict):
+                        print("INFO: List形式のレスポンスを検出、最初の要素を使用")
+                        data = data[0]
+                    else:
+                        print("WARN: List形式のレスポンスが不正")
+                        return self._fallback_extraction(question_text)
+                
+                # dictでない場合の処理
+                if not isinstance(data, dict):
+                    print(f"WARN: 予期しないデータ型: {type(data).__name__}")
+                    return self._fallback_extraction(question_text)
+                
+                print(f"INFO: データフィールド: {list(data.keys())}")
                 
                 # 必須フィールドをチェック
                 required_fields = ['title', 'question', 'choices', 'explanation']
@@ -332,15 +347,16 @@ class PastQuestionExtractor:
                     print(f"WARN: 選択肢不足: {len(choices)}個")
                     return self._fallback_extraction(question_text)
                 
-                # 正解が1つだけあることを確認
+                # 正解数の確認（複数正解も許可）
                 correct_count = sum(1 for choice in choices if choice.get('is_correct'))
-                if correct_count != 1:
-                    print(f"WARN: 正解数異常: {correct_count}個（1個である必要があります）")
-                    # 最初の選択肢を正解にして修正
-                    for i, choice in enumerate(choices):
-                        choice['is_correct'] = (i == 0)
+                if correct_count == 0:
+                    print(f"WARN: 正解が設定されていません")
+                    # 最初の選択肢を正解にする
+                    if choices:
+                        choices[0]['is_correct'] = True
+                        correct_count = 1
                 
-                print(f"OK: データ検証成功: {len(choices)}個の選択肢")
+                print(f"OK: データ検証成功: {len(choices)}個の選択肢, {correct_count}個の正解")
                 return data
             
             except json.JSONDecodeError as e:
@@ -605,14 +621,13 @@ class PastQuestionExtractor:
                 difficulty=data.get('difficulty', 'medium')
             )
             
-            if question:
-                # 選択肢を作成
+            if question:                # 選択肢を作成
                 for i, choice_data in enumerate(data['choices']):
                     choice_service.create_choice(
                         question_id=question.id,
                         content=choice_data['text'],
                         is_correct=choice_data['is_correct'],
-                        order=i + 1
+                        order_num=i + 1
                     )
                 
                 return question.id
