@@ -887,12 +887,40 @@ elif page == "🔧 問題管理":
                                         st.rerun()
                                         
                                 else:
-                                    st.error(f"❌ 問題{mode_text}に失敗しました。OpenAI APIの制限またはテキスト内容に問題がある可能性があります。")
+                                    st.error(f"❌ 問題{mode_text}に失敗しました。")
+                                    
+                                    # 詳細なエラー診断情報を表示
+                                    with st.expander("🔍 エラー診断情報"):
+                                        st.markdown("**考えられる原因:**")
+                                        st.markdown("1. **OpenAI APIキー**: APIキーが設定されていないか無効")
+                                        st.markdown("2. **API制限**: 使用量制限またはレート制限に達している")
+                                        st.markdown("3. **PDF内容**: テキストが正しく抽出されていない")
+                                        st.markdown("4. **ネットワーク**: インターネット接続に問題がある")
+                                        
+                                        # APIキーの状態確認
+                                        import os
+                                        api_key = os.getenv("OPENAI_API_KEY")
+                                        if api_key:
+                                            st.success(f"✅ OpenAI APIキー: 設定済み ({api_key[:10]}...)")
+                                        else:
+                                            st.error("❌ OpenAI APIキー: 未設定")
+                                            st.code("環境変数OPENAI_API_KEYを設定してください")
+                                        
+                                        # 抽出されたテキストの長さを確認
+                                        st.info(f"📊 抽出されたテキスト長: {len(extracted_text)} 文字")
+                                        if len(extracted_text) < 100:
+                                            st.warning("⚠️ 抽出されたテキストが短すぎる可能性があります")
                                 
                             except Exception as e:
                                 progress_bar.empty()
                                 status_text.empty()
-                                st.error(f"❌ エラーが発生しました: {e}")
+                                st.error(f"❌ エラーが発生しました: {str(e)}")
+                                
+                                # 詳細なエラー情報を表示
+                                with st.expander("🔍 詳細なエラー情報"):
+                                    import traceback
+                                    st.code(traceback.format_exc())
+                                    
                                 st.info("💡 ヒント: OpenAI APIキーが正しく設定されているか、PDFが読み取り可能か確認してください。")
                         
                         else:

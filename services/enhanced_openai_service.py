@@ -10,6 +10,10 @@ import time
 import json
 from typing import Optional, List, Dict
 from dataclasses import dataclass, asdict
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 
 @dataclass
@@ -242,6 +246,67 @@ class EnhancedOpenAIService:
             "max_retries": self.max_retries,
             "retry_delay": self.retry_delay
         }
+    
+    def call_openai_api(
+        self,
+        prompt: str,
+        max_tokens: int = 1500,
+        temperature: float = 0.7,
+        system_message: str = "あなたは資格試験問題作成の専門家です。正確で教育的な問題を作成してください。"
+    ) -> Optional[str]:
+        """
+        汎用的なOpenAI API呼び出しメソッド
+        """
+        for attempt in range(self.max_retries):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
+                
+                return response.choices[0].message.content
+                
+            except openai.RateLimitError as e:
+                if attempt < self.max_retries - 1:
+                    wait_time = self.retry_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"Rate limit exceeded. Waiting {wait_time}s before retry {attempt + 1}/{self.max_retries}")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"Rate limit exceeded after {self.max_retries} attempts: {e}")
+                    return None
+                    
+            except openai.APIError as e:
+                print(f"OpenAI API error on attempt {attempt + 1}: {e}")
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
+                    continue
+                else:
+                    print(f"OpenAI API error after {self.max_retries} attempts: {e}")
+                    return None
+                    
+            except json.JSONDecodeError as e:
+                print(f"JSON decode error on attempt {attempt + 1}: {e}")
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
+                    continue
+                else:
+                    return None
+                    
+            except Exception as e:
+                print(f"Unexpected error on attempt {attempt + 1}: {e}")
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
+                    continue
+                else:
+                    return None
+        
+        return None
 
 
 def test_enhanced_openai_service():

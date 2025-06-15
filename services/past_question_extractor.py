@@ -138,24 +138,39 @@ JSON形式で以下の構造で出力してください：
                 temperature=0.1  # 低温度で正確な抽出
             )
             
+            print(f"🔍 OpenAI API Response: {response[:200]}..." if response else "❌ No response from OpenAI API")
+            
             if response:
                 # JSONを解析
                 try:
                     data = json.loads(response)
+                    print(f"✅ JSON解析成功: {data.keys()}")
                     
                     # 必須フィールドをチェック
                     required_fields = ['title', 'question', 'choices', 'explanation']
                     if all(field in data for field in required_fields):
                         # 選択肢の検証
                         if len(data['choices']) >= 2:
+                            print(f"✅ データ検証成功: {len(data['choices'])}個の選択肢")
                             return data
+                        else:
+                            print(f"⚠️ 選択肢不足: {len(data['choices'])}個")
+                    else:
+                        missing_fields = [f for f in required_fields if f not in data]
+                        print(f"⚠️ 必須フィールド不足: {missing_fields}")
                 
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as e:
+                    print(f"❌ JSON解析失敗: {e}")
+                    print(f"Response content: {response}")
                     # JSON解析失敗時、簡単な正規表現で抽出を試行
                     return self._fallback_extraction(question_text)
+            else:
+                print("❌ OpenAI APIからのレスポンスが空です")
             
         except Exception as e:
-            print(f"OpenAI API エラー: {e}")
+            print(f"❌ OpenAI API エラー: {e}")
+            import traceback
+            traceback.print_exc()
             return self._fallback_extraction(question_text)
         
         return None
