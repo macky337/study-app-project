@@ -1,5 +1,5 @@
 """
-過去問抽出サービス（改善版）
+過去問抽出サービス
 PDFから既存の問題・選択肢・正解・解説をそのまま抽出する
 """
 
@@ -69,8 +69,7 @@ class PastQuestionExtractor:
                 import traceback
                 print(f"   詳細: {traceback.format_exc()}")
                 continue
-        
-        if progress_callback:
+          if progress_callback:
             progress_callback("過去問抽出完了", 1.0)
         
         return generated_question_ids
@@ -121,9 +120,10 @@ class PastQuestionExtractor:
         
         print(f"✅ 最終分割結果: {len(best_questions)}問")
         return best_questions
-
+        
+        return questions
     def _extract_question_structure(self, question_text: str) -> Optional[Dict]:
-        """OpenAI APIで問題構造を抽出（改善版）"""        
+        """OpenAI APIで問題構造を抽出"""        
         # 入力テキストが長すぎる場合は切り詰める（トークン制限対策）
         max_input_length = 2000  # 約500トークン相当
         if len(question_text) > max_input_length:

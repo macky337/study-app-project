@@ -294,16 +294,19 @@ class EnhancedOpenAIService:
                     return None
                     
             except openai.APIError as e:
-                print(f"OpenAI API error on attempt {attempt + 1}: {e}")
+                print(f"❌ OpenAI API error on attempt {attempt + 1}: {e}")
+                print(f"   エラータイプ: {type(e).__name__}")
+                print(f"   エラー詳細: {str(e)}")
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay)
                     continue
                 else:
-                    print(f"OpenAI API error after {self.max_retries} attempts: {e}")
+                    print(f"❌ OpenAI API error after {self.max_retries} attempts: {e}")
                     return None
                     
             except json.JSONDecodeError as e:
-                print(f"JSON decode error on attempt {attempt + 1}: {e}")
+                print(f"❌ JSON decode error on attempt {attempt + 1}: {e}")
+                print(f"   JSON解析失敗の可能性があります")
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay)
                     continue
@@ -311,7 +314,10 @@ class EnhancedOpenAIService:
                     return None
                     
             except Exception as e:
-                print(f"Unexpected error on attempt {attempt + 1}: {e}")
+                print(f"❌ Unexpected error on attempt {attempt + 1}: {e}")
+                print(f"   エラータイプ: {type(e).__name__}")
+                import traceback
+                print(f"   スタックトレース: {traceback.format_exc()}")
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay)
                     continue
