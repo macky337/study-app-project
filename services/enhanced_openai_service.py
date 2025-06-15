@@ -252,8 +252,7 @@ class EnhancedOpenAIService:
             "max_retries": self.max_retries,
             "retry_delay": self.retry_delay
         }
-    
-    def call_openai_api(
+      def call_openai_api(
         self,
         prompt: str,
         max_tokens: int = 1500,
@@ -263,8 +262,15 @@ class EnhancedOpenAIService:
         """
         汎用的なOpenAI API呼び出しメソッド
         """
+        print(f"🔑 API呼び出し開始 - モデル: {self.model}")
+        print(f"📝 システムメッセージ: {system_message[:100]}...")
+        print(f"📄 プロンプト長: {len(prompt)}文字")
+        print(f"🎛️ 設定: max_tokens={max_tokens}, temperature={temperature}")
+        
         for attempt in range(self.max_retries):
             try:
+                print(f"🔄 試行 {attempt + 1}/{self.max_retries}")
+                
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[
@@ -272,7 +278,8 @@ class EnhancedOpenAIService:
                         {"role": "user", "content": prompt}
                     ],
                     max_tokens=max_tokens,
-                    temperature=temperature,                    # プライバシー保護: PDFデータの学習を無効化
+                    temperature=temperature,
+                    # プライバシー保護: PDFデータの学習を無効化
                     extra_headers={
                         "X-OpenAI-Skip-Training": "true"
                     }
@@ -281,7 +288,15 @@ class EnhancedOpenAIService:
                 # プライバシー保護の確認ログ  
                 print("🔒 プライバシー保護: OpenAI学習無効化ヘッダー送信完了 (汎用API)")
                 
-                return response.choices[0].message.content
+                content = response.choices[0].message.content
+                print(f"✅ API応答成功: {len(content) if content else 0}文字")
+                
+                if content:
+                    print(f"📋 応答プレビュー: {content[:200]}...")
+                    return content
+                else:
+                    print("⚠️ 応答内容が空です")
+                    return None
                 
             except openai.RateLimitError as e:
                 if attempt < self.max_retries - 1:

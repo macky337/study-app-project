@@ -31,42 +31,21 @@ class PastQuestionExtractor:
         
         print(f"🔍 分割結果: {len(questions)}問を検出")
         for i, q in enumerate(questions[:3]):  # 最初の3問のプレビュー
-            print(f"   問題{i+1}プレビュー: {q[:100]}...")        
+            print(f"   問題{i+1}プレビュー: {q[:100]}...")
+        
         if progress_callback:
             progress_callback(f"{len(questions)}問の問題を検出しました", 0.2)
         
         generated_question_ids = []
         
         for i, question_text in enumerate(questions):
-            # 最初の10問のみ処理（デバッグ用制限）
-            if i >= 10:
-                print(f"⚠️ デバッグモード: 最初の10問のみ処理します")
-                break
-                
             if progress_callback:
-                progress = 0.2 + (0.7 * (i + 1) / min(len(questions), 10))
-                progress_callback(f"問題 {i+1}/{min(len(questions), 10)} を処理中...", progress)
-                
-            try:                # OpenAI APIで構造化抽出
+                progress = 0.2 + (0.7 * (i + 1) / len(questions))
+                progress_callback(f"問題 {i+1}/{len(questions)} を処理中...", progress)            
+            try:
+                # OpenAI APIで構造化抽出
                 print(f"📋 問題{i+1}を処理中... (長さ: {len(question_text)}文字)")
-                
-                # デバッグ: 問題テキストの最初の300文字を表示
-                preview_text = question_text[:300].replace('\n', ' ')
-                print(f"   テキストプレビュー: {preview_text}...")
-                
-                # 短時間でのAPI呼び出し試行
-                try:
-                    extracted_data = self._extract_question_structure(question_text)
-                except Exception as api_error:
-                    print(f"⚠️ API呼び出しエラー: {api_error}")
-                    extracted_data = None
-                
-                print(f"🔍 API応答結果: {'成功' if extracted_data else '失敗'}")
-                
-                # API失敗の場合は即座にフォールバックを使用
-                if not extracted_data:
-                    print(f"⚠️ API抽出失敗 - フォールバック抽出を実行します")
-                    extracted_data = self._fallback_extraction(question_text)
+                extracted_data = self._extract_question_structure(question_text)
                 
                 if extracted_data:
                     print(f"✅ 問題{i+1}: 抽出成功")
@@ -179,28 +158,13 @@ class PastQuestionExtractor:
             print(f"   プロンプト長: {len(prompt)} 文字")
             print(f"   入力テキスト長: {len(question_text)} 文字")
             
-            # API呼び出し前のタイムスタンプ
-            import time
-            start_time = time.time()
-            
             response = self.openai_service.call_openai_api(
                 prompt,
                 max_tokens=1500,  # より少なく設定
                 temperature=0.0   # 完全に決定的に
             )
             
-            end_time = time.time()
-            print(f"⏱️ API呼び出し時間: {end_time - start_time:.2f}秒")
-            
-            if response is None:
-                print("❌ OpenAI APIからのレスポンスがNone")
-                return self._fallback_extraction(question_text)
-            elif response == "":
-                print("❌ OpenAI APIからのレスポンスが空文字")
-                return self._fallback_extraction(question_text)
-            else:
-                print(f"✅ OpenAI API Response受信: {len(response)}文字")
-                print(f"🔍 応答の最初の500文字: {response[:500]}...")
+            print(f"🔍 OpenAI API Response: {response[:500]}..." if response else "❌ No response from OpenAI API")
             
             if response:
                 # レスポンスをクリーンアップ
@@ -263,7 +227,7 @@ class PastQuestionExtractor:
         return None
 
     def _fallback_extraction(self, text: str) -> Optional[Dict]:
-        """OpenAI API失敗時のフォールバック抽出（大幅改善版）"""
+        """OpenAI API失敗時のフォールバック抽出（改善版）"""
         
         try:
             print("🔄 フォールバック抽出を開始します...")
@@ -277,43 +241,25 @@ class PastQuestionExtractor:
             
             current_section = "question"
             
-            for line in lines:
-                # 選択肢パターンの検出（改良版）
-                choice_patterns = [
-                    r'^([①②③④])\s*(.+)',     # ①②③④ 形式
-                    r'^([ABCD])[.．)\s](.+)',  # A. B. C. D. 形式
-                    r'^([1234])[.．)\s](.+)',  # 1. 2. 3. 4. 形式
-                ]
-                
-                choice_found = False
-                for pattern in choice_patterns:
-                    choice_match = re.match(pattern, line)
-                    if choice_match:
-                        choice_letter = choice_match.group(1)
-                        choice_text = choice_match.group(2).strip()
-                        choices.append({
-                            "letter": choice_letter, 
-                            "text": choice_text
-                        })
-                        current_section = "choices"
-                        choice_found = True
-                        break
-                
-                if choice_found:
+            for line in lines:                
+                # 選択肢パターンの検出（より幅広く）
+                choice_match = re.match(r'^([A-D1-4])[.．)\s](.+)', line)
+                if choice_match:
+                    choice_letter = choice_match.group(1)
+                    choice_text = choice_match.group(2).strip()
+                    choices.append({
+                        "letter": choice_letter, 
+                        "text": choice_text
+                    })
+                    current_section = "choices"
                     continue
                 
-                # 正解パターンの検出（改良版）
-                correct_patterns = [
-                    r'(正解|答え|解答)[）：:\s]*([①②③④ABCD1234,、]+)',
-                    r'\((正解|答え|解答)[）：:\s]*([①②③④ABCD1234,、]+)',
-                ]
-                
-                for pattern in correct_patterns:
-                    correct_match = re.search(pattern, line, re.IGNORECASE)
-                    if correct_match:
-                        correct_answer = correct_match.group(2)
-                        current_section = "explanation"
-                        break
+                # 正解パターンの検出
+                correct_match = re.search(r'(正解|答え|解答)[：:\s]*([A-D1-4])', line, re.IGNORECASE)
+                if correct_match:
+                    correct_answer = correct_match.group(2)
+                    current_section = "explanation"
+                    continue
                 
                 # 解説パターンの検出
                 if re.match(r'^(解説|説明)[：:]', line, re.IGNORECASE):
@@ -332,22 +278,14 @@ class PastQuestionExtractor:
                 # 正解を設定
                 formatted_choices = []
                 for choice in choices:
-                    is_correct = False
-                    
-                    # 複数正解の場合の処理を改善
-                    if correct_answer:
-                        # 複数正解（②,④ や ②、④ など）
-                        correct_parts = re.split('[,、]', correct_answer.strip())
-                        correct_parts = [part.strip() for part in correct_parts]
-                        is_correct = choice["letter"] in correct_parts
-                    
+                    is_correct = choice["letter"] == correct_answer
                     formatted_choices.append({
                         "text": choice["text"],
                         "is_correct": is_correct
                     })
                 
                 # 正解が見つからない場合、最初を正解にする
-                if not any(c["is_correct"] for c in formatted_choices) and formatted_choices:
+                if not any(c["is_correct"] for c in formatted_choices):
                     formatted_choices[0]["is_correct"] = True
                 
                 result = {
@@ -359,8 +297,6 @@ class PastQuestionExtractor:
                 }
                 
                 print(f"✅ フォールバック抽出成功: {len(formatted_choices)}個の選択肢")
-                correct_count = sum(1 for c in formatted_choices if c["is_correct"])
-                print(f"   正解数: {correct_count}個, 検出した正解: {correct_answer}")
                 return result
             else:
                 print(f"❌ フォールバック抽出失敗: 問題={len(question_lines)}, 選択肢={len(choices)}")
