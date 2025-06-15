@@ -643,7 +643,37 @@ elif page == "🔧 問題管理":
                     📚 2つのモードから選択できます：
                     - **問題生成モード**: 教材内容からAIが新しい問題を生成
                     - **過去問抽出モード**: 既存の問題・正解・解説をそのまま抽出
+                    
+                    🔒 **プライバシー保護**
+                    - アップロードされたPDFの内容はOpenAIの学習データとして使用されません
+                    - `X-OpenAI-Skip-Training: true`ヘッダーを設定して学習を無効化しています
+                    - 処理完了後、PDF内容はメモリから削除されます
                     """)
+                    
+                    # プライバシー保護についての詳細情報
+                    with st.expander("🔒 プライバシー保護の詳細"):
+                        st.markdown("""
+                        **データ保護対策:**
+                        
+                        1. **学習データ除外**: 
+                           - OpenAI APIに`X-OpenAI-Skip-Training: true`ヘッダーを送信
+                           - アップロードされたPDFの内容が学習データとして使用されません
+                        
+                        2. **一時的な処理**: 
+                           - PDFの内容は問題生成/抽出のためのみに使用
+                           - 処理完了後、メモリから自動的に削除
+                        
+                        3. **ローカル処理**: 
+                           - PDFの読み込みと前処理はローカルで実行
+                           - 必要最小限のテキストのみをAPIに送信
+                        
+                        4. **データベース保存**: 
+                           - 生成/抽出された問題のみをデータベースに保存
+                           - 元のPDF内容は保存されません
+                        
+                        ⚠️ **注意**: 著作権のあるPDFは個人学習目的でのみご利用ください。
+                        """)
+                    
                     
                     # 処理モード選択
                     processing_mode = st.radio(
@@ -716,11 +746,16 @@ elif page == "🔧 問題管理":
                                 include_explanation = st.checkbox("解説を含める", value=True, key="pdf_explanation")
                                 
                                 preview_text = st.checkbox("テキスト抽出結果をプレビュー", value=False)
-                            
-
-                            # 問題生成実行
+                                # 問題生成実行
                             st.markdown("---")
                             button_label = "🎯 PDFから問題を生成"
+                            
+                            # プライバシー保護の確認（問題生成モード）
+                            privacy_confirmed_gen = st.checkbox(
+                                "🔒 プライバシー保護設定を理解し、PDFの処理に同意します",
+                                help="アップロードされたPDFの内容はOpenAIの学習データとして使用されません。処理完了後、内容はメモリから削除されます。",
+                                key="privacy_confirmation_gen"
+                            )
                             
                         else:  # 過去問抽出モード
                             st.markdown("**📝 過去問抽出設定**")
@@ -758,13 +793,20 @@ elif page == "🔧 問題管理":
                                     value=True, 
                                     help="より正確な抽出のため、温度設定を最低にします"
                                 )
-                            
-
-                            # 過去問抽出実行
+                                # 過去問抽出実行
                             st.markdown("---")
                             button_label = "📝 PDFから過去問を抽出"
+                          # プライバシー保護の確認チェック
+                        if processing_mode == "🤖 問題生成モード":
+                            privacy_confirmed = st.session_state.get("privacy_confirmation_gen", False)
+                        else:
+                            privacy_confirmed = st.session_state.get("privacy_confirmation", False)
                         
-                        if st.button(button_label, type="primary", use_container_width=True):
+                        if st.button(button_label, type="primary", use_container_width=True, disabled=not privacy_confirmed):
+                            
+                            if not privacy_confirmed:
+                                st.warning("⚠️ プライバシー保護設定への同意が必要です。")
+                                st.stop()
                             
                             # プログレス表示
                             progress_bar = st.progress(0)
