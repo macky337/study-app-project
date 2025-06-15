@@ -74,6 +74,80 @@ class PDFProcessor:
             st.error(f"pdfplumberでのテキスト抽出に失敗: {e}")
             return ""
     
+    def extract_text_auto(self, file_bytes: bytes) -> str:
+        """自動選択でテキストを抽出（複数方法を試行して最適な結果を選択）"""
+        results = {}
+        
+        # PyPDF2で試行
+        try:
+            pypdf2_text = self.extract_text_pypdf2(file_bytes)
+            results['pypdf2'] = {
+                'text': pypdf2_text,
+                'length': len(pypdf2_text),
+                'quality': self._assess_text_quality(pypdf2_text)
+            }
+        except Exception as e:
+            results['pypdf2'] = {'text': '', 'length': 0, 'quality': 0, 'error': str(e)}
+        
+        # pdfplumberで試行
+        try:
+            pdfplumber_text = self.extract_text_pdfplumber(file_bytes)
+            results['pdfplumber'] = {
+                'text': pdfplumber_text,
+                'length': len(pdfplumber_text),
+                'quality': self._assess_text_quality(pdfplumber_text)
+            }
+        except Exception as e:
+            results['pdfplumber'] = {'text': '', 'length': 0, 'quality': 0, 'error': str(e)}
+        
+        # 最適な結果を選択
+        best_method = None
+        best_score = 0
+        
+        for method, result in results.items():
+            if 'error' not in result:
+                # スコア計算: 品質 * 0.7 + 長さ正規化 * 0.3
+                length_score = min(result['length'] / 1000, 1.0)  # 1000文字で正規化
+                total_score = result['quality'] * 0.7 + length_score * 0.3
+                
+                if total_score > best_score:
+                    best_score = total_score
+                    best_method = method
+        
+        if best_method:
+            return results[best_method]['text']
+        else:
+            # 両方失敗した場合、エラーメッセージを含む空文字列を返す
+            return ""
+    
+    def _assess_text_quality(self, text: str) -> float:
+        """テキストの品質を評価（0.0-1.0）"""
+        if not text:
+            return 0.0
+        
+        quality_score = 0.0
+        
+        # 基本的な文字数チェック
+        if len(text) > 100:
+            quality_score += 0.3
+        
+        # 日本語文字の存在チェック
+        japanese_chars = sum(1 for char in text if ord(char) > 0x3000)
+        if japanese_chars > 0:
+            quality_score += 0.3
+        
+        # 英数字の存在チェック
+        ascii_chars = sum(1 for char in text if char.isalnum())
+        if ascii_chars > 0:
+            quality_score += 0.2
+        
+        # 構造的要素の存在チェック（改行、句読点など）
+        structural_chars = text.count('\n') + text.count('。') + text.count('.') + text.count('、')
+        if structural_chars > 5:
+            quality_score += 0.2
+        
+        return min(quality_score, 1.0)
+    
     def extract_text(self, uploaded_file) -> str:
         """PDFからテキストを抽出（複数方法を試行）"""
         file_bytes = uploaded_file.read()

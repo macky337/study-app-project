@@ -37,12 +37,12 @@ def run_git_command(command):
 
 def main():
     """現在の修正をプッシュ"""
-    print("⚡ クイックGitプッシュ - 構文エラー修正")
+    print("⚡ クイックGitプッシュ - PDFProcessor修正")
     print("=" * 50)
     
     # コミットメッセージ
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    commit_message = f"fix: tryブロック構文エラーを修正 - Railway デプロイ対応 - {timestamp}"
+    commit_message = f"fix: PDFProcessorにextract_text_autoメソッドを追加 - {timestamp}"
     
     print(f"📝 コミットメッセージ: {commit_message}")
     print()
@@ -60,7 +60,7 @@ def main():
             print(f"\n❌ ステップ{i}で失敗しました")
             return        print()    
     print("🎉 プッシュ完了！")
-    print("✅ 構文エラー修正が正常にプッシュされました")
+    print("✅ PDFProcessor修正が正常にプッシュされました")
 
 if __name__ == "__main__":
     main()

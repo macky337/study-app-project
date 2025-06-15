@@ -19,6 +19,9 @@ try:
     from database.connection import engine, DATABASE_URL
     from database.operations import QuestionService, ChoiceService, UserAnswerService
     from services.question_generator import QuestionGenerator
+    from services.pdf_processor import PDFProcessor
+    from services.pdf_question_generator import PDFQuestionGenerator
+    from services.past_question_extractor import PastQuestionExtractor
     from utils.helpers import generate_session_id, format_accuracy, get_difficulty_emoji
     
     DATABASE_AVAILABLE = engine is not None
@@ -626,13 +629,13 @@ elif page == "🔧 問題管理":
                 
                 # PDFアップロードと問題生成
                 try:
-                    from services.pdf_processor import PDFProcessor
-                    from services.pdf_question_generator import PDFQuestionGenerator
-                    from services.past_question_extractor import PastQuestionExtractor
-                    
                     pdf_processor = PDFProcessor()
-                    pdf_generator = PDFQuestionGenerator(session)
-                    past_extractor = PastQuestionExtractor(session)
+                    
+                    if DATABASE_AVAILABLE:
+                        pdf_generator = PDFQuestionGenerator(session)
+                        past_extractor = PastQuestionExtractor(session)
+                    else:
+                        st.warning("⚠️ データベース接続エラーのため、問題の保存ができません。テキスト抽出のみ可能です。")
                     
                     st.markdown("""
                     **PDF教材から問題を処理**
@@ -926,20 +929,15 @@ elif page == "🔧 問題管理":
                             - 抽出後は必ず内容を確認
                             
                             ---
-                            
-                            ⚠️ **共通注意事項:**
+                              ⚠️ **共通注意事項:**
                             - 著作権に注意してください
                             - 個人学習目的での利用を推奨します
-                            - 生成・抽出された問題は必ず内容を確認してください
-                            - 過去問は原文のまま利用されます
+                            - 生成・抽出された問題は必ず内容を確認してください                            - 過去問は原文のまま利用されます
                             """)
                 
-                except ImportError as e:
-                    st.error("❌ PDF処理ライブラリが不足しています")
-                    st.code("pip install PyPDF2 pdfplumber python-multipart")
-                    st.info("必要なライブラリをインストールしてアプリを再起動してください")
                 except Exception as e:
-                    st.error(f"PDF機能でエラーが発生しました: {e}")
+                    st.error(f"❌ PDF機能でエラーが発生しました: {e}")
+                    st.info("💡 必要なライブラリがインストールされているか確認してください。")
             
             with tab4:
                 st.markdown("### 📊 生成統計")
