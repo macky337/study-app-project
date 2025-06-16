@@ -49,6 +49,48 @@ class QuestionService:
         statement = select(Question).where(Question.category == category).order_by(func.random()).limit(limit)
         return self.session.exec(statement).all()
     
+    def get_all_categories(self) -> List[str]:
+        """全ての問題のカテゴリを取得"""
+        statement = select(Question.category).distinct()
+        result = self.session.exec(statement).all()
+        return [category for category in result if category]
+    
+    def get_categories(self) -> List[str]:
+        """全ての問題のカテゴリを取得（get_all_categoriesのエイリアス）"""
+        return self.get_all_categories()
+    
+    def get_category_statistics(self) -> dict:
+        """各カテゴリの統計情報を取得"""
+        statement = select(Question.category, func.count(Question.id)).group_by(Question.category)
+        result = self.session.exec(statement).all()
+        
+        stats = {}
+        for category, count in result:
+            if category:  # Noneまたは空文字列を除外
+                stats[category] = {
+                    'count': count,
+                    'category': category
+                }
+        
+        return stats
+    
+    def count_questions_by_category(self, category: str) -> int:
+        """指定されたカテゴリの問題数をカウント"""
+        statement = select(func.count(Question.id)).where(Question.category == category)
+        return self.session.exec(statement).first() or 0
+    
+    def get_category_stats(self) -> dict:
+        """各カテゴリの問題数の統計を取得"""
+        statement = select(Question.category, func.count(Question.id)).group_by(Question.category)
+        result = self.session.exec(statement).all()
+        
+        stats = {}
+        for category, count in result:
+            if category:  # Noneまたは空文字列を除外
+                stats[category] = count
+        
+        return stats
+    
     def validate_question_integrity(self, question_id: int) -> dict:
         """問題の整合性を検証"""
         from services.enhanced_openai_service import EnhancedOpenAIService
@@ -130,10 +172,14 @@ class QuestionService:
         validation_result["details"]["content_length"] = len(question.content) if question.content else 0
         
         return validation_result
-    
     def _validate_with_ai(self, question, choices):
         """AIを使用した高度な検証"""
-        openai_service = EnhancedOpenAIService(model_name="gpt-4o-mini")
+        try:
+            from services.enhanced_openai_service import EnhancedOpenAIService
+            openai_service = EnhancedOpenAIService(model_name="gpt-4o-mini")
+        except ImportError:
+            # インポートエラーの場合は基本検証のみ
+            return {"coherent": True, "error": "AI検証は利用できません"}
         
         # 検証用プロンプト
         choice_text = "\n".join([f"{i+1}. {choice.text}" for i, choice in enumerate(choices)])
@@ -375,6 +421,87 @@ class QuestionService:
                 "message": f"作成エラー: {e}"
             }
         
+    def validate_question_and_choices(self, question, choices) -> dict:
+        """
+        問題と選択肢の妥当性を検証
+        
+        Args:
+            question: 問題オブジェクト（一時的なオブジェクトでも可）
+            choices: 選択肢のリスト
+            
+        Returns:
+            dict: {
+                "valid": bool,
+                "errors": List[str],
+                "warnings": List[str],
+                "details": dict
+            }
+        """
+        validation_result = {
+            "valid": True,
+            "errors": [],
+            "warnings": [],
+            "details": {}
+        }
+        
+        # 問題の基本検証
+        if not hasattr(question, 'title') or not question.title or len(question.title.strip()) < 3:
+            validation_result["errors"].append("問題タイトルが短すぎます（3文字以上必要）")
+        
+        if not hasattr(question, 'content') or not question.content or len(question.content.strip()) < 5:
+            validation_result["errors"].append("問題文が短すぎます（5文字以上必要）")
+        
+        if not hasattr(question, 'category') or not question.category or len(question.category.strip()) < 2:
+            validation_result["errors"].append("カテゴリが設定されていないか短すぎます")
+        
+        # 選択肢の基本検証
+        if not choices or len(choices) < 2:
+            validation_result["errors"].append("選択肢が2個未満です（最低2個必要）")
+        elif len(choices) > 6:
+            validation_result["warnings"].append("選択肢が6個を超えています（推奨: 2-6個）")
+        
+        if choices:
+            # 正解の検証
+            correct_choices = []
+            for choice in choices:
+                if hasattr(choice, 'is_correct') and choice.is_correct:
+                    correct_choices.append(choice)
+            
+            if len(correct_choices) == 0:
+                validation_result["errors"].append("正解が設定されていません")
+            elif len(correct_choices) > 1:
+                validation_result["warnings"].append("複数の正解が設定されています")
+            
+            # 選択肢の内容検証
+            choice_texts = []
+            for i, choice in enumerate(choices):
+                choice_text = getattr(choice, 'text', getattr(choice, 'content', ''))
+                if not choice_text or len(choice_text.strip()) < 1:
+                    validation_result["errors"].append(f"選択肢{i+1}が空です")
+                elif len(choice_text) > 200:
+                    validation_result["warnings"].append(f"選択肢{i+1}が長すぎます（200文字以下推奨）")
+                
+                choice_texts.append(choice_text.strip().lower())
+            
+            # 選択肢の重複チェック
+            if len(choice_texts) != len(set(choice_texts)):
+                validation_result["warnings"].append("重複する選択肢があります")
+            
+            # 詳細情報を設定
+            validation_result["details"]["choice_count"] = len(choices)
+            validation_result["details"]["correct_count"] = len(correct_choices)
+        
+        # 問題の詳細情報を設定
+        if hasattr(question, 'title') and question.title:
+            validation_result["details"]["title_length"] = len(question.title)
+        if hasattr(question, 'content') and question.content:
+            validation_result["details"]["content_length"] = len(question.content)
+        
+        # 最終判定
+        if validation_result["errors"]:
+            validation_result["valid"] = False
+        
+        return validation_result
 
 class ChoiceService:
     """選択肢関連の操作"""

@@ -31,48 +31,134 @@ class PDFProcessor:
         # 拡張子チェック
         file_extension = os.path.splitext(uploaded_file.name)[1].lower()
         if file_extension not in self.allowed_extensions:
-            return False, f"サポートされていないファイル形式です。PDF形式のみ対応しています"
-        
+            return False, f"サポートされていないファイル形式です。PDF形式のみ対応しています"        
         return True, "OK"
     
     def extract_text_pypdf2(self, file_bytes: bytes) -> str:
         """PyPDF2を使用してテキストを抽出"""
         try:
+            if not file_bytes or len(file_bytes) < 10:
+                st.error("❌ 無効なPDFデータです")
+                return ""
+            
+            # PDFヘッダーチェック
+            if not file_bytes.startswith(b'%PDF-'):
+                st.error("❌ 有効なPDFファイルではありません")
+                return ""
+            
             pdf_file = io.BytesIO(file_bytes)
             pdf_reader = PyPDF2.PdfReader(pdf_file)
             
-            text = ""
-            for page in pdf_reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
+            # 基本的なPDF検証
+            if not pdf_reader.pages:
+                st.error("❌ PDFにページが見つかりません")
+                return ""
             
-            return text.strip()
+            # 暗号化チェック
+            if pdf_reader.is_encrypted:
+                st.error("❌ 暗号化されたPDFは対応していません")
+                return ""
+            
+            text = ""
+            num_pages = len(pdf_reader.pages)
+            
+            # ページ数制限
+            if num_pages > 100:
+                st.warning(f"⚠️ ページ数が多いPDFです ({num_pages}ページ)。処理に時間がかかる場合があります。")
+                # 最初の50ページのみ処理
+                pages_to_process = pdf_reader.pages[:50]
+                st.info("📄 最初の50ページのみ処理します")
+            else:
+                pages_to_process = pdf_reader.pages
+            
+            for i, page in enumerate(pages_to_process):
+                try:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+                except Exception as page_error:
+                    st.warning(f"⚠️ ページ {i+1} の処理中にエラー: {page_error}")
+                    continue
+            
+            extracted_text = text.strip()
+            
+            if not extracted_text:
+                st.error("❌ テキストを抽出できませんでした（画像ベースのPDFの可能性があります）")
+                return ""
+            
+            return extracted_text
+            
         except Exception as e:
-            st.error(f"PyPDF2でのテキスト抽出に失敗: {e}")
+            st.error(f"❌ PyPDF2でのテキスト抽出に失敗: {e}")
             return ""
-    
     def extract_text_pdfplumber(self, file_bytes: bytes) -> str:
         """pdfplumberを使用してテキストを抽出（より高精度）"""
+        tmp_file_path = None
         try:
+            if not file_bytes or len(file_bytes) < 10:
+                st.error("❌ 無効なPDFデータです")
+                return ""
+            
+            # PDFヘッダーチェック
+            if not file_bytes.startswith(b'%PDF-'):
+                st.error("❌ 有効なPDFファイルではありません")
+                return ""
+            
+            # 一時ファイル作成
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
                 tmp_file.write(file_bytes)
                 tmp_file_path = tmp_file.name
             
+            # ファイルが正常に作成されたか確認
+            if not os.path.exists(tmp_file_path):
+                st.error("❌ 一時ファイルの作成に失敗しました")
+                return ""
+            
             text = ""
             with pdfplumber.open(tmp_file_path) as pdf:
-                for page in pdf.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n"
+                # PDFの基本情報チェック
+                if not pdf.pages:
+                    st.error("❌ PDFにページが見つかりません")
+                    return ""
+                
+                num_pages = len(pdf.pages)
+                
+                # ページ数制限
+                if num_pages > 100:
+                    st.warning(f"⚠️ ページ数が多いPDFです ({num_pages}ページ)。処理に時間がかかる場合があります。")
+                    # 最初の50ページのみ処理
+                    pages_to_process = pdf.pages[:50]
+                    st.info("📄 最初の50ページのみ処理します")
+                else:
+                    pages_to_process = pdf.pages
+                
+                for i, page in enumerate(pages_to_process):
+                    try:
+                        page_text = page.extract_text()
+                        if page_text:
+                            text += page_text + "\n"
+                    except Exception as page_error:
+                        st.warning(f"⚠️ ページ {i+1} の処理中にエラー: {page_error}")
+                        continue
             
-            # 一時ファイルを削除
-            os.unlink(tmp_file_path)
+            extracted_text = text.strip()
             
-            return text.strip()
+            if not extracted_text:
+                st.error("❌ テキストを抽出できませんでした（画像ベースのPDFの可能性があります）")
+                return ""
+            
+            return extracted_text
+            
         except Exception as e:
-            st.error(f"pdfplumberでのテキスト抽出に失敗: {e}")
+            st.error(f"❌ pdfplumberでのテキスト抽出に失敗: {e}")
             return ""
+        finally:
+            # 一時ファイルの確実な削除
+            if tmp_file_path and os.path.exists(tmp_file_path):
+                try:
+                    os.unlink(tmp_file_path)
+                except Exception as cleanup_error:
+                    st.warning(f"⚠️ 一時ファイルの削除に失敗: {cleanup_error}")
     
     def extract_text_auto(self, file_bytes: bytes) -> str:
         """自動選択でテキストを抽出（複数方法を試行して最適な結果を選択）"""

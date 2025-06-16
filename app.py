@@ -229,43 +229,55 @@ elif page == "🎲 クイズ":
             # カテゴリ選択UI
             st.markdown("### 🎯 カテゴリ選択")
             
-            # 利用可能なカテゴリを取得
-            categories = question_service.get_all_categories()
-            category_stats = question_service.get_category_stats()
+            try:
+                # 利用可能なカテゴリを取得
+                categories = question_service.get_all_categories()
+                category_stats = question_service.get_category_stats()
+            except Exception as category_error:
+                st.error(f"❌ カテゴリ情報の取得に失敗しました: {category_error}")
+                st.info("💡 データベースに問題が登録されていない可能性があります。")
+                st.stop()
             
-            if categories:
+            if not categories:
+                st.warning("⚠️ 問題が登録されていません。")
+                st.info("💡 問題管理ページで問題を追加してください。")
+                st.stop()
                 # カテゴリ選択ボックス
                 category_options = ["すべて"] + categories
                 category_display = {
                     "すべて": f"すべて ({sum(category_stats.values())}問)"
-                }
-                
-                # 各カテゴリの問題数を表示
-                for cat in categories:
-                    count = category_stats.get(cat, 0)
-                    category_display[cat] = f"{cat} ({count}問)"
-                
-                selected_category = st.selectbox(
-                    "出題するカテゴリを選択してください",
-                    options=category_options,
-                    format_func=lambda x: category_display.get(x, x),
-                    index=category_options.index(st.session_state.selected_category) if st.session_state.selected_category in category_options else 0,
-                    key="category_selector"
-                )
-                
-                # カテゴリが変更された場合の処理
-                if selected_category != st.session_state.selected_category:
-                    st.session_state.selected_category = selected_category
-                    st.session_state.current_question = None  # 現在の問題をリセット
-                    st.session_state.show_result = False
-                    st.session_state.answered_questions.clear()  # 回答済み問題をリセット
-                    st.info(f"📚 カテゴリを「{category_display[selected_category]}」に変更しました")
-                    st.rerun()
-                
-                st.markdown("---")
-            else:
-                st.warning("⚠️ 問題が登録されていません。")
-                st.stop()            # 新しい問題を取得
+                }            
+            # カテゴリ選択ボックス
+            category_options = ["すべて"] + categories
+            category_display = {
+                "すべて": f"すべて ({sum(category_stats.values())}問)"
+            }
+            
+            # 各カテゴリの問題数を表示
+            for cat in categories:
+                count = category_stats.get(cat, 0)
+                category_display[cat] = f"{cat} ({count}問)"
+            
+            selected_category = st.selectbox(
+                "出題するカテゴリを選択してください",
+                options=category_options,
+                format_func=lambda x: category_display.get(x, x),
+                index=category_options.index(st.session_state.selected_category) if st.session_state.selected_category in category_options else 0,
+                key="category_selector"
+            )
+            
+            # カテゴリが変更された場合の処理
+            if selected_category != st.session_state.selected_category:
+                st.session_state.selected_category = selected_category
+                st.session_state.current_question = None  # 現在の問題をリセット
+                st.session_state.show_result = False
+                st.session_state.answered_questions.clear()  # 回答済み問題をリセット
+                st.info(f"📚 カテゴリを「{category_display[selected_category]}」に変更しました")
+                st.rerun()
+            
+            st.markdown("---")
+            
+            # 新しい問題を取得
             if st.session_state.current_question is None:
                 # 既に回答した問題を除外して取得
                 max_attempts = 10
@@ -891,8 +903,7 @@ elif page == "🔧 問題管理":
                             progress_bar.empty()
                             status_text.empty()
                             st.error(f"❌ エラーが発生しました: {e}")
-                            st.info("💡 ヒント: OpenAI APIキーが正しく設定されているか、PDFが読み取り可能か確認してください。")
-                        
+                            st.info("💡 ヒント: OpenAI APIキーが正しく設定されているか、PDFが読み取り可能か確認してください。")                        
                 with col2:
                     if st.button("🔄 フォームリセット"):
                         st.rerun()
@@ -902,11 +913,25 @@ elif page == "🔧 問題管理":
                 
                 # PDFアップロードと問題生成
                 try:
-                    pdf_processor = PDFProcessor()
+                    # PDF処理クラスの初期化
+                    try:
+                        pdf_processor = PDFProcessor()
+                        st.success("✅ PDF処理エンジン初期化完了")
+                    except Exception as processor_error:
+                        st.error(f"❌ PDF処理エンジンの初期化に失敗しました: {processor_error}")
+                        st.error("PDF処理に必要なライブラリ（PyPDF2, pdfplumber）が正しくインストールされていない可能性があります。")
+                        st.code("pip install PyPDF2 pdfplumber", language="bash")
+                        st.stop()
                     
+                    # データベース接続確認
                     if DATABASE_AVAILABLE:
-                        pdf_generator = PDFQuestionGenerator(session, model_name="gpt-4o-mini")
-                        past_extractor = PastQuestionExtractor(session)
+                        try:
+                            pdf_generator = PDFQuestionGenerator(session, model_name="gpt-4o-mini")
+                            past_extractor = PastQuestionExtractor(session)
+                            st.success("✅ 問題生成エンジン初期化完了")
+                        except Exception as gen_error:
+                            st.error(f"❌ 問題生成エンジンの初期化に失敗しました: {gen_error}")
+                            st.warning("⚠️ 問題生成機能が利用できません。テキスト抽出のみ実行可能です。")
                     else:
                         st.warning("⚠️ データベース接続エラーのため、問題の保存ができません。テキスト抽出のみ可能です。")
                     
@@ -1247,24 +1272,39 @@ elif page == "🔧 問題管理":
                             try:
                                 # プライバシー保護の確認表示
                                 st.info("PRIVACY: OpenAI学習無効化ヘッダーを設定して処理を開始します")
-                                
-                                # PDFテキスト抽出
+                                  # PDFテキスト抽出
                                 status_text.text("PDFからテキストを抽出中...")
                                 progress_bar.progress(0.1)
                                 
                                 try:
+                                    # ファイルポインタを先頭に戻す
+                                    uploaded_file.seek(0)
                                     file_bytes = uploaded_file.read()
+                                    
                                     if not file_bytes:
-                                        st.error("ERROR: PDFファイルの読み込みに失敗しました")
+                                        st.error("❌ PDFファイルの読み込みに失敗しました（空のファイル）")
                                         st.stop()
+                                    
+                                    # PDFファイルの基本検証
+                                    if not file_bytes.startswith(b'%PDF-'):
+                                        st.error("❌ 有効なPDFファイルではありません（PDFヘッダーが見つかりません）")
+                                        st.stop()
+                                    
+                                    # ファイルサイズの確認
+                                    if len(file_bytes) != uploaded_file.size:
+                                        st.warning(f"⚠️ ファイルサイズが一致しません（期待: {uploaded_file.size}, 実際: {len(file_bytes)}）")
                                         
-                                    st.info(f"INFO: PDFファイルサイズ: {len(file_bytes)} bytes")
+                                    st.success(f"✅ PDFファイル読み込み成功: {len(file_bytes):,} bytes")
                                     
                                 except Exception as read_error:
-                                    st.error(f"ERROR: ファイル読み込みエラー: {read_error}")
+                                    st.error(f"❌ ファイル読み込みエラー: {read_error}")
+                                    st.error("ファイルが破損している可能性があります。別のPDFファイルを試してください。")
                                     st.stop()
                                 
                                 # テキスト抽出の実行
+                                status_text.text("テキストを抽出中...")
+                                progress_bar.progress(0.2)
+                                
                                 try:
                                     if extraction_method == "auto":
                                         extracted_text = pdf_processor.extract_text_auto(file_bytes)
@@ -1272,19 +1312,35 @@ elif page == "🔧 問題管理":
                                         extracted_text = pdf_processor.extract_text_pypdf2(file_bytes)
                                     else:
                                         extracted_text = pdf_processor.extract_text_pdfplumber(file_bytes)
-                                        
+                                    
+                                    # 抽出結果の検証
                                     if not extracted_text:
-                                        st.error("ERROR: テキスト抽出結果が空です")
+                                        st.error("❌ テキスト抽出結果が空です")
+                                        st.error("このPDFは画像ベースである可能性があります。OCR機能は現在サポートしていません。")
+                                        st.stop()
+                                    
+                                    if len(extracted_text.strip()) < 50:
+                                        st.error("❌ 抽出されたテキストが短すぎます")
+                                        st.error("このPDFから十分なテキストを抽出できませんでした。")
                                         st.stop()
                                         
-                                    st.info(f"INFO: 抽出テキスト長: {len(extracted_text)} 文字")
+                                    st.success(f"✅ テキスト抽出成功: {len(extracted_text):,} 文字")
                                     
                                 except Exception as extract_error:
-                                    st.error(f"ERROR: テキスト抽出エラー: {extract_error}")
-                                    st.stop()
-                                
-                                if not extracted_text or len(extracted_text.strip()) < 50:
-                                    st.error("ERROR: PDFからテキストを抽出できませんでした。ファイルが画像ベースのPDFまたは保護されている可能性があります。")
+                                    st.error(f"❌ テキスト抽出エラー: {extract_error}")
+                                    st.error("PDFの形式が対応していない可能性があります。")
+                                    
+                                    # 詳細なエラー情報
+                                    with st.expander("🔍 詳細なエラー情報"):
+                                        st.code(f"エラータイプ: {type(extract_error).__name__}")
+                                        st.code(f"エラーメッセージ: {str(extract_error)}")
+                                        st.markdown("""
+                                        **対処方法:**
+                                        1. 別のPDFファイルを試してください
+                                        2. PDFが暗号化されていないか確認してください
+                                        3. PDFが画像ベースでないか確認してください
+                                        4. ファイルサイズが大きすぎないか確認してください（50MB以下）
+                                        """)
                                     st.stop()
                                 
                                 # テキストプレビュー
@@ -1310,11 +1366,11 @@ elif page == "🔧 問題管理":
                                     # 問題生成モード
                                     status_text.text("問題を生成中...")
                                     progress_bar.progress(0.3)
-                                    
-                                    # 選択されたモデルでPDFジェネレーターを再初期化
+                                      # 選択されたモデルでPDFジェネレーターを再初期化
                                     pdf_generator = PDFQuestionGenerator(session, model_name=pdf_selected_model)
                                     
                                     try:
+                                        st.info(f"🤖 {pdf_selected_model} を使用して問題生成を開始します...")
                                         generated_ids = pdf_generator.generate_questions_from_pdf(
                                             text=extracted_text,
                                             num_questions=pdf_num_questions,
@@ -1326,21 +1382,65 @@ elif page == "🔧 問題管理":
                                             max_retry_attempts=pdf_max_retry_attempts if pdf_enable_duplicate_check else 3
                                         )
                                         mode_text = "生成"
+                                        st.success(f"✅ 問題生成完了: {len(generated_ids) if generated_ids else 0}問")
                                         
                                     except Exception as gen_error:
-                                        st.error(f"ERROR: 問題生成エラー: {gen_error}")
-                                        status_text.text("問題生成に失敗しました")
                                         progress_bar.empty()
+                                        status_text.empty()
+                                        st.error(f"❌ 問題生成エラーが発生しました")
+                                        
+                                        # 詳細なエラー情報
+                                        with st.expander("🔍 問題生成エラーの詳細"):
+                                            st.code(f"エラータイプ: {type(gen_error).__name__}")
+                                            st.code(f"エラーメッセージ: {str(gen_error)}")
+                                            
+                                            # エラーの分類と対処法
+                                            error_str = str(gen_error).lower()
+                                            if 'api' in error_str or 'openai' in error_str:
+                                                st.error("🔑 OpenAI APIエラーと思われます")
+                                                st.markdown("""
+                                                **対処方法:**
+                                                - APIキーが正しく設定されているか確認
+                                                - API利用制限に達していないか確認
+                                                - インターネット接続を確認
+                                                - しばらく時間をおいて再試行
+                                                """)
+                                            elif 'database' in error_str or 'sql' in error_str:
+                                                st.error("💾 データベースエラーと思われます")
+                                                st.markdown("""
+                                                **対処方法:**
+                                                - データベース接続を確認
+                                                - ディスク容量を確認
+                                                - アプリケーションを再起動
+                                                """)
+                                            elif 'memory' in error_str or 'size' in error_str:
+                                                st.error("💾 メモリ不足エラーと思われます")
+                                                st.markdown("""
+                                                **対処方法:**
+                                                - より小さなPDFファイルを使用
+                                                - 生成問題数を減らす
+                                                - 他のアプリケーションを終了
+                                                """)
+                                            else:
+                                                st.error("❓ 不明なエラー")
+                                                st.markdown("""
+                                                **対処方法:**
+                                                - アプリケーションを再起動
+                                                - 別のPDFファイルで試行
+                                                - システム管理者に連絡
+                                                """)
+                                        
                                         st.stop()
                                     
                                 else:  # 過去問抽出モード
                                     # 過去問抽出モード
                                     status_text.text("過去問を抽出中...")
                                     progress_bar.progress(0.3)
-                                    
-                                    # 選択されたモデルで過去問抽出器を再初期化
+                                      # 選択されたモデルで過去問抽出器を再初期化
                                     past_extractor = PastQuestionExtractor(session, model_name=past_selected_model)
+                                    
                                     try:
+                                        st.info(f"📝 {past_selected_model} を使用して過去問抽出を開始します...")
                                         generated_ids = past_extractor.extract_past_questions_from_pdf(
                                             text=extracted_text,
                                             category=pdf_category,
@@ -1351,15 +1451,56 @@ elif page == "🔧 問題管理":
                                             duplicate_action=past_duplicate_action if past_enable_duplicate_check else "skip"
                                         )
                                         mode_text = "抽出"
+                                        st.success(f"✅ 過去問抽出完了: {len(generated_ids) if generated_ids else 0}問")
                                         
                                     except Exception as extract_error:
-                                        st.error(f"ERROR: 過去問抽出エラー: {extract_error}")
-                                        status_text.text("過去問抽出に失敗しました")
                                         progress_bar.empty()
+                                        status_text.empty()
+                                        st.error(f"❌ 過去問抽出エラーが発生しました")
+                                        
+                                        # 詳細なエラー情報
+                                        with st.expander("🔍 過去問抽出エラーの詳細"):
+                                            st.code(f"エラータイプ: {type(extract_error).__name__}")
+                                            st.code(f"エラーメッセージ: {str(extract_error)}")
+                                            
+                                            # エラーの分類と対処法
+                                            error_str = str(extract_error).lower()
+                                            if 'api' in error_str or 'openai' in error_str:
+                                                st.error("🔑 OpenAI APIエラーと思われます")
+                                                st.markdown("""
+                                                **対処方法:**
+                                                - APIキーが正しく設定されているか確認
+                                                - API利用制限に達していないか確認
+                                                - より高精度なモデル（gpt-4o）を試す
+                                                """)
+                                            elif 'format' in error_str or 'parse' in error_str:
+                                                st.error("📄 PDF形式エラーと思われます")
+                                                st.markdown("""
+                                                **対処方法:**
+                                                - 過去問の形式が標準的でない可能性があります
+                                                - より構造化されたPDFを使用
+                                                - 問題生成モードを試す
+                                                """)
+                                            elif 'duplicate' in error_str:
+                                                st.warning("🔍 重複検出による処理中断")
+                                                st.markdown("""
+                                                **情報:**
+                                                - 重複チェックにより処理が中断されました
+                                                - 重複チェックを無効にして再試行
+                                                - 既存の問題を確認
+                                                """)
+                                            else:
+                                                st.error("❓ 不明なエラー")
+                                                st.markdown("""
+                                                **対処方法:**
+                                                - 問題生成モードを試す
+                                                - 別のPDFファイルで試行
+                                                - システム管理者に連絡
+                                                """)
                                         st.stop()
                                     
                                 # 共通の成功処理
-                                if generated_ids:
+                                if generated_ids and len(generated_ids) > 0:
                                     progress_bar.progress(1.0)
                                     status_text.text("PDF処理完了！")
                                     
@@ -1367,7 +1508,39 @@ elif page == "🔧 問題管理":
                                     progress_bar.empty()
                                     status_text.empty()
                                     
-                                    st.success(f"✅ {len(generated_ids)}問の問題を処理しました！")
+                                    # mode_text変数が定義されていることを確認
+                                    if 'mode_text' not in locals():
+                                        mode_text = "処理"
+                                    
+                                    st.success(f"✅ {len(generated_ids)}問の問題を{mode_text}しました！")
+                                else:
+                                    # 失敗時の処理
+                                    progress_bar.empty()
+                                    status_text.empty()
+                                    st.error("❌ PDF処理に失敗しました")
+                                    st.warning("⚠️ 問題の生成または抽出ができませんでした")
+                                    
+                                    # 失敗の原因分析
+                                    with st.expander("🔍 失敗の原因と対処法"):
+                                        st.markdown("""
+                                        **考えられる原因:**
+                                        1. **テキスト内容不足**: 抽出されたテキストから問題を作成できない
+                                        2. **API制限**: OpenAI APIの利用制限に達している
+                                        3. **重複検出**: すべての生成問題が重複と判定された
+                                        4. **形式エラー**: PDFの形式が対応していない
+                                        
+                                        **対処方法:**
+                                        - より内容の充実したPDFファイルを使用
+                                        - 重複チェックを無効にして再試行
+                                        - 生成問題数を減らして再試行
+                                        - 別のAIモデルを選択
+                                        - しばらく時間をおいて再実行
+                                        """)
+                                    
+                                    st.stop()
+                                
+                                # 生成された問題がある場合の詳細処理
+                                if generated_ids and len(generated_ids) > 0:
                                     
                                     # 統計情報表示
                                     total_choices = 0
@@ -1421,15 +1594,75 @@ elif page == "🔧 問題管理":
                                 else:
                                     st.error("❌ PDF処理に失敗しました")
                                     
-                            except Exception as e:
+                            except Exception as processing_error:
                                 progress_bar.empty()
                                 status_text.empty()
-                                st.error(f"❌ PDFファイル処理でエラーが発生しました: {e}")
-                                st.info("💡 ヒント: OpenAI APIキーが正しく設定されているか、PDFが読み取り可能か確認してください。")
+                                st.error(f"❌ PDF処理中にエラーが発生しました")
+                                
+                                # 詳細なエラー情報
+                                with st.expander("🔍 エラーの詳細情報"):
+                                    st.code(f"エラータイプ: {type(processing_error).__name__}")
+                                    st.code(f"エラーメッセージ: {str(processing_error)}")
+                                    
+                                    # 一般的な原因と対処法
+                                    st.markdown("""
+                                    **考えられる原因:**
+                                    1. **OpenAI APIエラー**: APIキーが無効または利用制限に達している
+                                    2. **PDF形式エラー**: サポートされていないPDF形式
+                                    3. **メモリ不足**: PDFファイルが大きすぎる
+                                    4. **ネットワークエラー**: インターネット接続の問題
+                                    5. **データベースエラー**: 問題保存時のエラー
+                                    
+                                    **対処方法:**
+                                    - OpenAI APIキーを確認してください
+                                    - より小さなPDFファイルを試してください
+                                    - インターネット接続を確認してください
+                                    - しばらく時間をおいて再試行してください
+                                    """)
+                                
+                                # 診断情報の表示
+                                st.info("🔧 システム診断情報:")
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("データベース", "✅ 接続済み" if DATABASE_AVAILABLE else "❌ 接続失敗")
+                                with col2:
+                                    openai_available = 'OPENAI_API_KEY' in os.environ and os.environ['OPENAI_API_KEY']
+                                    st.metric("OpenAI API", "✅ 設定済み" if openai_available else "❌ 未設定")
+                                with col3:
+                                    st.metric("PDFファイル", f"{uploaded_file.size / 1024:.1f} KB" if uploaded_file else "❌ なし")
                 
-                except Exception as e:
-                    st.error(f"❌ PDF機能でエラーが発生しました: {e}")
-                    st.info("💡 必要なライブラリがインストールされているか確認してください。")
+                except Exception as tab_error:
+                    st.error(f"❌ PDF機能の初期化でエラーが発生しました: {tab_error}")
+                    
+                    # トラブルシューティング情報
+                    with st.expander("🛠️ トラブルシューティング"):
+                        st.markdown("""
+                        **PDF機能を利用するために必要な環境:**
+                        
+                        1. **必要なライブラリ**:
+                        ```bash
+                        pip install PyPDF2 pdfplumber streamlit
+                        ```
+                        
+                        2. **Python環境**: Python 3.8以上
+                        
+                        3. **メモリ**: 最低2GB以上の空きメモリ
+                        
+                        4. **権限**: 一時ファイル作成権限
+                        
+                        **よくある問題:**
+                        - `ModuleNotFoundError`: ライブラリが未インストール
+                        - `PermissionError`: ファイル書き込み権限がない
+                        - `MemoryError`: 利用可能メモリが不足
+                        
+                        **対処方法:**
+                        1. 必要なライブラリを再インストール
+                        2. Pythonを管理者権限で実行
+                        3. より小さなPDFファイルを使用
+                        4. 他のアプリケーションを終了してメモリを確保
+                        """)
+                    
+                    st.info("💡 問題が解決しない場合は、システム管理者にお問い合わせください。")
             
             with tab4:
                 st.markdown("### 🔍 重複問題検査・削除")

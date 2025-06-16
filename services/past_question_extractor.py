@@ -92,25 +92,26 @@ class PastQuestionExtractor:
                         print(f"   テキストプレビュー: {truncated_text[:200]}...")
                         failed_extractions += 1
                         continue
-                
-                if extracted_data:
-                    print(f"OK: 問題{i+1}: 抽出成功")
-                    successful_extractions += 1
-                      # データベースに保存
-                    question_id = self._save_extracted_question(
-                        extracted_data, 
-                        category,
-                        question_number=i+1,
-                        enable_duplicate_check=enable_duplicate_check,
-                        similarity_threshold=similarity_threshold,
-                        duplicate_action=duplicate_action
-                    )
-                    
-                    if question_id:
-                        generated_question_ids.append(question_id)
-                        print(f"SAVED: 問題{i+1}: DB保存成功 (ID: {question_id})")
-                    else:
-                        print(f"ERROR: 問題{i+1}: DB保存失敗")
+
+                    if extracted_data:
+                        print(f"OK: 問題{i+1}: 抽出成功")
+                        successful_extractions += 1
+                        # データベースに保存
+                        question_id = self._save_extracted_question(
+                            extracted_data, 
+                            category,
+                            question_number=i+1,
+                            enable_duplicate_check=enable_duplicate_check,
+                            similarity_threshold=similarity_threshold,
+                            duplicate_action=duplicate_action
+                        )
+                        if question_id and question_id != "SKIPPED_DUPLICATE":
+                            generated_question_ids.append(question_id)
+                            print(f"SAVED: 問題{i+1}: DB保存成功 (ID: {question_id})")
+                        elif question_id == "SKIPPED_DUPLICATE":
+                            print(f"SKIPPED: 問題{i+1}: 重複のためスキップ")
+                        else:
+                            print(f"ERROR: 問題{i+1}: DB保存失敗")
                 else:
                     print(f"ERROR: 問題{i+1}: 抽出失敗 - データが不正またはAPI応答なし")
                     failed_extractions += 1
@@ -671,8 +672,7 @@ class PastQuestionExtractor:
                 except Exception as e:
                     print(f"⚠️ 過去問{question_number}の内容検証でエラー: {e}")
                     # 検証エラーの場合は継続
-            
-            # 重複チェック
+              # 重複チェック
             if enable_duplicate_check:
                 # 重複チェック付きで問題を作成
                 if hasattr(question_service, 'create_question_with_duplicate_check'):
@@ -689,7 +689,7 @@ class PastQuestionExtractor:
                     if not creation_result.get("success", False):
                         if duplicate_action == "skip":
                             print(f"INFO: 問題{question_number} - 重複のためスキップ")
-                            return None
+                            return "SKIPPED_DUPLICATE"  # 重複でスキップしたことを明示
                         else:  # save_with_warning
                             print(f"WARNING: 問題{question_number} - 重複の可能性あり、警告付きで保存")
                             # 通常の作成処理にフォールバック
