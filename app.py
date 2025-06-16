@@ -488,9 +488,8 @@ elif page == "🔧 問題管理":
     try:
         with get_database_session() as session:
             question_service = QuestionService(session)
-            choice_service = ChoiceService(session)
-              # タブで機能を分割
-            tab1, tab2, tab3, tab4 = st.tabs(["📝 問題一覧", "🤖 AI問題生成", "📄 PDF問題生成", "📊 生成統計"])
+            choice_service = ChoiceService(session)            # タブで機能を分割
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 問題一覧", "🤖 AI問題生成", "📄 PDF問題生成", "🔍 重複検査", "📊 生成統計"])
             
             with tab1:
                 st.markdown("### 📝 問題一覧・管理")
@@ -665,6 +664,36 @@ elif page == "🔧 問題管理":
                             ["short", "medium", "long"],
                             format_func=lambda x: {"short": "短い", "medium": "標準", "long": "詳細"}[x]
                         )
+                        
+                        st.markdown("---")
+                        st.markdown("**🔍 重複チェック設定**")
+                        
+                        enable_duplicate_check = st.checkbox(
+                            "重複問題チェックを有効にする",
+                            value=True,
+                            help="既存の問題と類似する問題の生成を防ぎます"
+                        )
+                        
+                        if enable_duplicate_check:
+                            similarity_threshold = st.slider(
+                                "類似度閾値",
+                                min_value=0.5,
+                                max_value=1.0,
+                                value=0.8,
+                                step=0.05,
+                                help="この値以上の類似度を持つ問題は重複として判定されます"
+                            )
+                            
+                            max_retry_attempts = st.slider(
+                                "重複時の最大再試行回数",
+                                min_value=1,
+                                max_value=5,
+                                value=3,
+                                help="重複が検出された場合の最大再生成回数"
+                            )
+                        else:
+                            similarity_threshold = 0.8
+                            max_retry_attempts = 0
                 
                 with col2:
                     st.markdown("**生成履歴**")
@@ -712,7 +741,6 @@ elif page == "🔧 問題管理":
                                 st.stop()
                             
                             generated_ids = []
-                            
                             # プログレスコールバック関数
                             def update_progress(message, progress):
                                 status_text.text(message)
@@ -724,7 +752,10 @@ elif page == "🔧 問題管理":
                                     category=category,
                                     difficulty=difficulty,
                                     topic=topic if topic else None,
-                                    progress_callback=update_progress
+                                    progress_callback=update_progress,
+                                    enable_duplicate_check=enable_duplicate_check,
+                                    similarity_threshold=similarity_threshold,
+                                    max_retry_attempts=max_retry_attempts
                                 )
                                 
                                 if question_id:
@@ -732,16 +763,19 @@ elif page == "🔧 問題管理":
                             else:
                                 # 複数問題生成
                                 topics_list = [t.strip() for t in topic.split('\n') if t.strip()] if topic else None
-                                
                                 generated_ids = generator.generate_and_save_multiple_questions(
                                     category=category,
                                     difficulty=difficulty,
                                     count=count,
                                     topics=topics_list,
                                     progress_callback=update_progress,
-                                    delay_between_requests=1.5  # Rate limiting
+                                    delay_between_requests=1.5,  # Rate limiting
+                                    enable_duplicate_check=enable_duplicate_check,
+                                    similarity_threshold=similarity_threshold,
+                                    max_retry_attempts=max_retry_attempts
                                 )
-                              # 結果表示
+                            
+                            # 結果表示
                             progress_container.empty()
                             progress_bar.empty()
                             status_text.empty()
@@ -993,12 +1027,40 @@ elif page == "🔧 問題管理":
                                         "pypdf2": "PyPDF2（高速）",
                                         "pdfplumber": "PDFplumber（高精度）"
                                     }[x],
-                                    help="自動選択では両方の方法を試して最適な結果を選択します"
-                                )
+                                    help="自動選択では両方の方法を試して最適な結果を選択します"                                )
                                 
                                 include_explanation = st.checkbox("解説を含める", value=True, key="pdf_explanation")
                                 
                                 preview_text = st.checkbox("テキスト抽出結果をプレビュー", value=False)
+                                
+                                # 重複チェック設定
+                                st.markdown("**🔍 重複チェック設定**")
+                                pdf_enable_duplicate_check = st.checkbox(
+                                    "重複チェックを有効にする",
+                                    value=True,
+                                    help="既存の問題と重複する場合は再生成を試みます",
+                                    key="pdf_enable_duplicate_check"
+                                )
+                                
+                                if pdf_enable_duplicate_check:
+                                    pdf_similarity_threshold = st.slider(
+                                        "類似度閾値",
+                                        min_value=0.3,
+                                        max_value=0.9,
+                                        value=0.7,
+                                        step=0.05,
+                                        help="この値より高い類似度の問題は重複とみなされます",
+                                        key="pdf_similarity_threshold"
+                                    )
+                                    
+                                    pdf_max_retry_attempts = st.slider(
+                                        "最大再試行回数",
+                                        min_value=1,
+                                        max_value=5,
+                                        value=3,
+                                        help="重複が検出された場合の再生成試行回数",
+                                        key="pdf_max_retry_attempts"
+                                    )
                                 # 問題生成実行
                             st.markdown("---")
                             button_label = "🎯 PDFから問題を生成"
@@ -1008,7 +1070,7 @@ elif page == "🔧 問題管理":
                                 help="アップロードされたPDFの内容はOpenAIの学習データとして使用されません。処理完了後、内容はメモリから削除されます。",
                                 key="privacy_confirmation_gen"
                             )
-                            
+                        
                         else:  # 過去問抽出モード
                             st.markdown("**📝 過去問抽出設定**")
                             
@@ -1077,8 +1139,7 @@ elif page == "🔧 問題管理":
                                 st.markdown("""
                                 - 問題文、選択肢、正解、解説をそのまま抽出
                                 - 元の内容を一切改変しません
-                                - 問題番号で自動分割を試行
-                                - 抽出精度を向上させるため低温度設定を使用
+                                - 問題番号で自動分割を試行                                - 抽出精度を向上させるため低温度設定を使用
                                 """)
                                 preview_text = st.checkbox("テキスト抽出結果をプレビュー", value=True, key="past_preview")
                                 
@@ -1087,6 +1148,34 @@ elif page == "🔧 問題管理":
                                     value=True, 
                                     help="より正確な抽出のため、温度設定を最低にします"
                                 )
+                                
+                                # 重複チェック設定
+                                st.markdown("**🔍 重複チェック設定**")
+                                past_enable_duplicate_check = st.checkbox(
+                                    "重複チェックを有効にする",
+                                    value=True,
+                                    help="既存の問題と重複する場合はスキップまたは重複警告を表示します",
+                                    key="past_enable_duplicate_check"
+                                )
+                                
+                                if past_enable_duplicate_check:
+                                    past_similarity_threshold = st.slider(
+                                        "類似度閾値",
+                                        min_value=0.3,
+                                        max_value=0.9,
+                                        value=0.7,
+                                        step=0.05,
+                                        help="この値より高い類似度の問題は重複とみなされます",
+                                        key="past_similarity_threshold"
+                                    )
+                                    
+                                    past_duplicate_action = st.radio(
+                                        "重複時の動作",
+                                        ["skip", "save_with_warning"],
+                                        format_func=lambda x: {"skip": "スキップ", "save_with_warning": "警告付きで保存"}[x],
+                                        help="重複問題が検出された時の処理方法",
+                                        key="past_duplicate_action"
+                                    )
                             
                             # 過去問抽出実行
                             st.markdown("---")
@@ -1189,7 +1278,10 @@ elif page == "🔧 問題管理":
                                             num_questions=pdf_num_questions,
                                             difficulty=pdf_difficulty,
                                             category=pdf_category,
-                                            progress_callback=pdf_progress_callback
+                                            progress_callback=pdf_progress_callback,
+                                            enable_duplicate_check=pdf_enable_duplicate_check,
+                                            similarity_threshold=pdf_similarity_threshold if pdf_enable_duplicate_check else 0.7,
+                                            max_retry_attempts=pdf_max_retry_attempts if pdf_enable_duplicate_check else 3
                                         )
                                         mode_text = "生成"
                                         
@@ -1203,14 +1295,18 @@ elif page == "🔧 問題管理":
                                     # 過去問抽出モード
                                     status_text.text("過去問を抽出中...")
                                     progress_bar.progress(0.3)
-                                      # 選択されたモデルで過去問抽出器を再初期化
+                                    
+                                    # 選択されたモデルで過去問抽出器を再初期化
                                     past_extractor = PastQuestionExtractor(session, model_name=past_selected_model)
                                     try:
                                         generated_ids = past_extractor.extract_past_questions_from_pdf(
                                             text=extracted_text,
                                             category=pdf_category,
                                             max_questions=max_extract_questions,
-                                            progress_callback=pdf_progress_callback
+                                            progress_callback=pdf_progress_callback,
+                                            enable_duplicate_check=past_enable_duplicate_check,
+                                            similarity_threshold=past_similarity_threshold if past_enable_duplicate_check else 0.7,
+                                            duplicate_action=past_duplicate_action if past_enable_duplicate_check else "skip"
                                         )
                                         mode_text = "抽出"
                                         
@@ -1294,6 +1390,155 @@ elif page == "🔧 問題管理":
                     st.info("💡 必要なライブラリがインストールされているか確認してください。")
             
             with tab4:
+                st.markdown("### 🔍 重複問題検査・削除")
+                
+                st.markdown("""
+                このツールは、データベース内の重複する可能性のある問題を検出し、削除することができます。
+                """)
+                
+                # 検査タイプの選択
+                detection_type = st.radio(
+                    "検査タイプを選択してください",
+                    options=["exact", "similar"],
+                    format_func=lambda x: {
+                        "exact": "🎯 完全重複検査（タイトル・内容が完全一致）",
+                        "similar": "🔍 類似問題検査（類似度ベース）"
+                    }[x],
+                    help="完全重複検査は確実な重複のみ、類似問題検査は類似度で判定します"
+                )
+                
+                if detection_type == "similar":
+                    similarity_threshold = st.slider(
+                        "類似度閾値", 
+                        min_value=0.5, 
+                        max_value=1.0, 
+                        value=0.8, 
+                        step=0.05,
+                        help="この値以上の類似度を持つ問題を重複として検出します"
+                    )
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("🔍 重複検査を実行", use_container_width=True):
+                        with st.spinner("重複問題を検査中..."):
+                            try:
+                                if detection_type == "exact":
+                                    duplicates = question_service.find_exact_duplicate_questions()
+                                else:
+                                    duplicates = question_service.find_duplicate_questions(similarity_threshold)
+                                
+                                if duplicates:
+                                    st.session_state.duplicate_groups = duplicates
+                                    st.success(f"✅ {len(duplicates)}組の重複グループを検出しました")
+                                else:
+                                    st.info("📋 重複する問題は見つかりませんでした")
+                                    st.session_state.duplicate_groups = []
+                            
+                            except Exception as e:
+                                st.error(f"❌ 検査エラー: {e}")
+                
+                with col2:
+                    if 'duplicate_groups' in st.session_state and st.session_state.duplicate_groups:
+                        total_duplicates = sum(len(group) for group in st.session_state.duplicate_groups)
+                        st.metric("検出された重複問題数", f"{total_duplicates}問")
+                        st.metric("重複グループ数", f"{len(st.session_state.duplicate_groups)}組")
+                
+                # 重複問題の表示と削除
+                if 'duplicate_groups' in st.session_state and st.session_state.duplicate_groups:
+                    st.markdown("---")
+                    st.markdown("### 🗂️ 検出された重複問題")
+                    
+                    for group_idx, duplicate_group in enumerate(st.session_state.duplicate_groups):
+                        with st.expander(f"重複グループ {group_idx + 1} ({len(duplicate_group)}問)", expanded=True):
+                            
+                            # グループ内の問題を表示
+                            for idx, question in enumerate(duplicate_group):
+                                col1, col2, col3 = st.columns([3, 1, 1])
+                                
+                                with col1:
+                                    st.markdown(f"**{idx + 1}. {question.title}** (ID: {question.id})")
+                                    st.markdown(f"📁 カテゴリ: {question.category}")
+                                    st.markdown(f"📝 内容: {question.content[:100]}...")
+                                    
+                                    # 選択肢も表示
+                                    choices = choice_service.get_choices_by_question(question.id)
+                                    if choices:
+                                        choice_text = " / ".join([f"{chr(65+i)}:{c.content[:20]}..." for i, c in enumerate(choices[:2])])
+                                        st.markdown(f"🔤 選択肢: {choice_text}")
+                                
+                                with col2:
+                                    question_selected = st.checkbox(
+                                        "削除対象",
+                                        key=f"delete_question_{question.id}",
+                                        help=f"問題ID {question.id}を削除対象に選択"
+                                    )
+                                
+                                with col3:
+                                    if st.button(f"👁️ 詳細", key=f"detail_{question.id}"):
+                                        st.session_state[f"show_detail_{question.id}"] = not st.session_state.get(f"show_detail_{question.id}", False)
+                                
+                                # 詳細表示
+                                if st.session_state.get(f"show_detail_{question.id}", False):
+                                    with st.container():
+                                        st.markdown("**📋 完全な問題内容:**")
+                                        st.markdown(f"**タイトル:** {question.title}")
+                                        st.markdown(f"**カテゴリ:** {question.category}")
+                                        st.markdown(f"**難易度:** {question.difficulty}")
+                                        st.markdown(f"**問題文:** {question.content}")
+                                        
+                                        if choices:
+                                            st.markdown("**選択肢:**")
+                                            for choice_idx, choice in enumerate(choices):
+                                                correct_mark = " ✅" if choice.is_correct else ""
+                                                st.markdown(f"{chr(65+choice_idx)}. {choice.content}{correct_mark}")
+                                        
+                                        if question.explanation:
+                                            st.markdown(f"**解説:** {question.explanation}")
+                                
+                                st.markdown("---")
+                    
+                    # 一括削除ボタン
+                    st.markdown("### 🗑️ 選択された問題の削除")
+                    
+                    # 削除対象の問題IDを収集
+                    selected_question_ids = []
+                    for group in st.session_state.duplicate_groups:
+                        for question in group:
+                            if st.session_state.get(f"delete_question_{question.id}", False):
+                                selected_question_ids.append(question.id)
+                    
+                    if selected_question_ids:
+                        st.warning(f"⚠️ {len(selected_question_ids)}問が削除対象として選択されています")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("🗑️ 選択された問題を削除", type="primary", use_container_width=True):
+                                with st.spinner("問題を削除中..."):
+                                    result = question_service.delete_multiple_questions(selected_question_ids)
+                                    
+                                    if result["deleted_count"] > 0:
+                                        st.success(f"✅ {result['deleted_count']}問を正常に削除しました")
+                                    
+                                    if result["failed_ids"]:
+                                        st.error(f"❌ {len(result['failed_ids'])}問の削除に失敗しました: {result['failed_ids']}")
+                                    
+                                    # 削除後は検査結果をクリア
+                                    st.session_state.duplicate_groups = []
+                                    st.rerun()
+                        
+                        with col2:
+                            if st.button("🔄 選択をクリア", use_container_width=True):
+                                # すべての選択をクリア
+                                for group in st.session_state.duplicate_groups:
+                                    for question in group:
+                                        if f"delete_question_{question.id}" in st.session_state:
+                                            st.session_state[f"delete_question_{question.id}"] = False
+                                st.rerun()
+                    else:
+                        st.info("💡 削除したい問題にチェックを入れてください")
+
+            with tab5:
                 st.markdown("### 📊 生成統計")
                 
                 try:
@@ -1448,8 +1693,7 @@ elif page == "⚙️ 設定":
                                     content="公開鍵暗号方式において、データの暗号化に使用されるキーはどれですか？",
                                     category="セキュリティ",
                                     explanation="公開鍵暗号方式では、公開鍵で暗号化し、秘密鍵で復号化します。",
-                                    difficulty="hard"
-                                )
+                                    difficulty="hard"                                )
                                 
                                 choice_service.create_choice(q4.id, "秘密鍵", False, 1)
                                 choice_service.create_choice(q4.id, "公開鍵", True, 2)

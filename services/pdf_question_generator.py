@@ -22,7 +22,10 @@ class PDFQuestionGenerator:
         num_questions: int = 5,
         difficulty: str = "medium",
         category: str = "PDF教材",
-        progress_callback=None
+        progress_callback=None,
+        enable_duplicate_check: bool = True,
+        similarity_threshold: float = 0.7,
+        max_retry_attempts: int = 3
     ) -> List[int]:
         """PDFテキストから問題を生成"""
         
