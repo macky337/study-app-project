@@ -44,6 +44,23 @@ class QuestionService:
         statement = select(Question).order_by(func.random()).limit(limit)
         return self.session.exec(statement).all()
     
+    def get_random_questions_by_category(self, category: str, limit: int = 10) -> List[Question]:
+        """指定したカテゴリからランダムに問題を取得"""
+        statement = select(Question).where(Question.category == category).order_by(func.random()).limit(limit)
+        return self.session.exec(statement).all()
+    
+    def get_all_categories(self) -> List[str]:
+        """データベースに存在するすべてのカテゴリを取得"""
+        statement = select(Question.category).distinct()
+        categories = self.session.exec(statement).all()
+        return sorted([cat for cat in categories if cat])  # Noneを除外してソート
+    
+    def get_category_stats(self) -> dict:
+        """カテゴリごとの問題数を取得"""
+        statement = select(Question.category, func.count(Question.id)).group_by(Question.category)
+        results = self.session.exec(statement).all()
+        return {category: count for category, count in results if category}
+    
     def update_question(
         self,
         question_id: int,
@@ -126,6 +143,10 @@ class ChoiceService:
         """問題IDで選択肢を取得"""
         statement = select(Choice).where(Choice.question_id == question_id).order_by(Choice.order_num)
         return self.session.exec(statement).all()
+    
+    def get_choices_by_question_id(self, question_id: int) -> List[Choice]:
+        """問題IDで選択肢を取得（エイリアス）"""
+        return self.get_choices_by_question(question_id)
     
     def update_choice(
         self,

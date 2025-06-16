@@ -37,13 +37,64 @@ class GeneratedQuestion:
 class EnhancedOpenAIService:
     """Enhanced OpenAI service with better error handling"""
     
-    def __init__(self):
+    # Available models
+    AVAILABLE_MODELS = {
+        "gpt-3.5-turbo": {
+            "name": "GPT-3.5 Turbo",
+            "description": "高速で経済的、日常的な問題生成に適している",
+            "cost": "低",
+            "quality": "良"
+        },
+        "gpt-4o-mini": {
+            "name": "GPT-4o Mini", 
+            "description": "GPT-4の軽量版、高品質で経済的",
+            "cost": "中",
+            "quality": "優"
+        },
+        "gpt-4o": {
+            "name": "GPT-4o",
+            "description": "最高品質の問題生成、複雑な内容に対応",
+            "cost": "高",
+            "quality": "最優"
+        },
+        "gpt-4": {
+            "name": "GPT-4",
+            "description": "高品質な問題生成、詳細な解説",
+            "cost": "高",
+            "quality": "最優"
+        }
+    }
+    
+    def __init__(self, model: str = "gpt-3.5-turbo", model_name: str = None):
+        print("Initializing EnhancedOpenAIService...")
+        
+        # Use model_name if provided, otherwise use model parameter
+        selected_model = model_name if model_name is not None else model
+        
+        # Check API key
         self.api_key = os.getenv("OPENAI_API_KEY")
         if not self.api_key:
+            print("ERROR: OPENAI_API_KEY environment variable is not set")
             raise ValueError("OPENAI_API_KEY environment variable is not set")
         
-        self.client = OpenAI(api_key=self.api_key)
-        self.model = "gpt-3.5-turbo"
+        print(f"API Key found: {self.api_key[:10]}...{self.api_key[-4:]}")
+        
+        # Validate and set model
+        if selected_model not in self.AVAILABLE_MODELS:
+            print(f"Warning: Model {selected_model} not in available models, using gpt-3.5-turbo")
+            selected_model = "gpt-3.5-turbo"
+        
+        self.model = selected_model
+        print(f"Using model: {self.model} ({self.AVAILABLE_MODELS[self.model]['name']})")
+        
+        # Initialize OpenAI client with error handling
+        try:
+            self.client = OpenAI(api_key=self.api_key)
+            print("OpenAI client initialized successfully")
+        except Exception as e:
+            print(f"ERROR: Failed to initialize OpenAI client: {e}")
+            raise ConnectionError(f"Failed to initialize OpenAI client: {e}")
+        
         self.max_retries = 3
         self.retry_delay = 1.0
     
@@ -91,7 +142,23 @@ class EnhancedOpenAIService:
                 print("PRIVACY: OpenAI学習無効化ヘッダー送信完了")
                 
                 content = response.choices[0].message.content
-                question_data = json.loads(content)
+                print(f"🤖 OpenAI Raw Response Length: {len(content)} characters")
+                print(f"🤖 OpenAI Raw Response Preview: {content[:200]}...")
+                
+                try:
+                    question_data = json.loads(content)
+                    print(f"📋 Parsed JSON keys: {list(question_data.keys())}")
+                    if 'choices' in question_data:
+                        print(f"📋 Choices found in response: {len(question_data['choices'])} items")
+                        for i, choice in enumerate(question_data['choices'][:2]):  # 最初の2つのみ表示
+                            print(f"   Choice {i+1}: {choice}")
+                    else:
+                        print("❌ No 'choices' key found in OpenAI response!")
+                        print(f"Available keys: {list(question_data.keys())}")
+                except json.JSONDecodeError as e:
+                    print(f"❌ JSON parsing failed: {e}")
+                    print(f"Raw content: {content}")
+                    return None
                 
                 return self._parse_question_response(question_data, category, difficulty)
                 
@@ -157,13 +224,15 @@ class EnhancedOpenAIService:
 
 **条件:**
 1. 問題文は具体的で実践的な内容にする
-2. 選択肢は4つ作成する
-3. 正解は1つのみ
+2. 選択肢は必ず4つ作成する（この条件は絶対に守ってください）
+3. 正解は必ず1つのみ
 4. 間違いの選択肢も教育的価値があるものにする
 5. 解説は詳しく、なぜその答えが正しいかを説明する
 6. 難易度「{difficulty}」に適した問題レベルにする
 
-**JSON形式:**
+**重要: 選択肢は必ず4つ作成してください。これは必須要件です。**
+
+**JSON形式（必ずこの形式で回答）:**
 {{
     "title": "問題のタイトル（簡潔に）",
     "content": "問題文（具体的で明確に）",
@@ -176,7 +245,11 @@ class EnhancedOpenAIService:
     ]
 }}
 
-必ずvalid JSONを返してください。
+**注意事項:**
+- choicesキーは必ず含めてください
+- 4つの選択肢は必須です
+- 各選択肢にはcontentとis_correctを必ず含めてください
+- 必ずvalid JSONを返してください
 """
         return prompt
     
@@ -189,38 +262,54 @@ class EnhancedOpenAIService:
         """Parse the response from OpenAI into a GeneratedQuestion object"""
         
         try:
+            print(f"Parsing OpenAI response: {question_data}")
+            
             # Validate required fields
             required_fields = ["title", "content", "explanation", "choices"]
             for field in required_fields:
                 if field not in question_data:
-                    print(f"Missing required field: {field}")
+                    print(f"❌ Missing required field: {field}")
+                    print(f"Available fields: {list(question_data.keys())}")
                     return None
+            
+            print("✅ All required fields present")
             
             # Validate choices
             choices_data = question_data["choices"]
-            if not isinstance(choices_data, list) or len(choices_data) != 4:
-                print("Choices must be a list of exactly 4 items")
+            if not isinstance(choices_data, list):
+                print(f"❌ Choices is not a list: {type(choices_data)}")
                 return None
+                
+            if len(choices_data) != 4:
+                print(f"❌ Expected 4 choices, got {len(choices_data)}")
+                return None
+            
+            print(f"✅ Found {len(choices_data)} choices")
             
             # Check for exactly one correct answer
             correct_count = sum(1 for choice in choices_data if choice.get("is_correct", False))
             if correct_count != 1:
-                print(f"Must have exactly 1 correct answer, found {correct_count}")
+                print(f"❌ Must have exactly 1 correct answer, found {correct_count}")
+                print(f"Choices: {choices_data}")
                 return None
+            
+            print("✅ Exactly one correct answer found")
             
             # Create choices
             choices = []
-            for choice_data in choices_data:
+            for i, choice_data in enumerate(choices_data):
                 if "content" not in choice_data:
-                    print("Choice missing content field")
+                    print(f"❌ Choice {i} missing content field")
                     return None
                 
                 choices.append(GeneratedChoice(
                     content=choice_data["content"],
                     is_correct=choice_data.get("is_correct", False)
                 ))
+                
+                print(f"✅ Choice {i+1}: {choice_data['content'][:50]}... (correct: {choice_data.get('is_correct', False)})")
             
-            return GeneratedQuestion(
+            result = GeneratedQuestion(
                 title=question_data["title"],
                 content=question_data["content"],
                 category=category,
@@ -229,6 +318,9 @@ class EnhancedOpenAIService:
                 choices=choices
             )
             
+            print(f"✅ Question parsed successfully: {result.title}")
+            return result
+            
         except Exception as e:
             print(f"Error parsing question response: {e}")
             return None
@@ -236,14 +328,26 @@ class EnhancedOpenAIService:
     def test_connection(self) -> bool:
         """Test the OpenAI API connection"""
         try:
+            print("Testing OpenAI API connection...")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": "Hello"}],
-                max_tokens=5
+                max_tokens=5,
+                timeout=30
             )
+            print("OpenAI API connection test successful")
             return True
+        except openai.APIConnectionError as e:
+            print(f"Connection test failed - API Connection Error: {e}")
+            return False
+        except openai.RateLimitError as e:
+            print(f"Connection test failed - Rate Limit Error: {e}")
+            return False
+        except openai.AuthenticationError as e:
+            print(f"Connection test failed - Authentication Error: {e}")
+            return False
         except Exception as e:
-            print(f"Connection test failed: {e}")
+            print(f"Connection test failed - General Error: {e}")
             return False
     
     def get_usage_info(self) -> Dict:

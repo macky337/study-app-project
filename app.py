@@ -1,6 +1,7 @@
 import streamlit as st
 import time
 from datetime import datetime
+import os
 
 # ページ設定（最初に実行する必要がある）
 st.set_page_config(
@@ -65,6 +66,13 @@ except Exception as e:
     print(f"❌ Database connection error: {e}")
     print("Running in demo mode without database functionality")
 
+# OpenAI API key check
+openai_key = os.getenv('OPENAI_API_KEY')
+if openai_key:
+    print(f"✅ OpenAI API key found: {openai_key[:10]}...{openai_key[-4:]}")
+else:
+    print("⚠️ OpenAI API key not found - AI features will be limited")
+
 # データベースエラーがある場合は警告を表示
 if DATABASE_ERROR:
     st.error(f"⚠️ Database connection failed: {DATABASE_ERROR}")
@@ -86,6 +94,8 @@ if 'answered_questions' not in st.session_state:
     st.session_state.answered_questions = set()
 if 'quiz_choice_key' not in st.session_state:
     st.session_state.quiz_choice_key = 1
+if 'selected_category' not in st.session_state:
+    st.session_state.selected_category = "すべて"  # デフォルトは全カテゴリ
 
 st.title("🎯 Study Quiz App")
 st.markdown("資格試験対策用のクイズ学習アプリ")
@@ -168,10 +178,10 @@ if page == "🏠 ホーム":
                 with get_database_session() as session:
                     question_service = QuestionService(session)
                     user_answer_service = UserAnswerService(session)
-                    
-                    # 問題数を取得
+                      # 問題数を取得
                     total_questions = len(question_service.get_random_questions(limit=1000))
-                      # セッション統計を取得
+                    
+                    # セッション統計を取得
                     stats = user_answer_service.get_user_stats(st.session_state.session_id)
                     
                     st.markdown("### 📊 統計情報")
@@ -190,7 +200,9 @@ if page == "🏠 ホーム":
     
     with col2:
         st.markdown("### 🚀 クイズを開始")
-        if st.button("🎲 ランダムクイズ", use_container_width=True):
+        st.markdown("カテゴリを選択して問題に挑戦！")
+        
+        if st.button("🎲 クイズモードへ", use_container_width=True):
             st.session_state.current_question = None
             st.session_state.show_result = False
             st.session_state.user_answer = None
@@ -198,6 +210,8 @@ if page == "🏠 ホーム":
             st.session_state.answered_questions.clear()
             st.session_state.page = "🎲 クイズ"  # ページを直接切り替え
             st.rerun()
+            
+        st.info("💡 クイズモードでは、カテゴリを選択して問題を解くことができます")
 
 elif page == "🎲 クイズ":
     st.subheader("🎲 クイズモード")
@@ -210,7 +224,48 @@ elif page == "🎲 クイズ":
         with get_database_session() as session:
             question_service = QuestionService(session)
             choice_service = ChoiceService(session)
-            user_answer_service = UserAnswerService(session)            # 新しい問題を取得
+            user_answer_service = UserAnswerService(session)
+            
+            # カテゴリ選択UI
+            st.markdown("### 🎯 カテゴリ選択")
+            
+            # 利用可能なカテゴリを取得
+            categories = question_service.get_all_categories()
+            category_stats = question_service.get_category_stats()
+            
+            if categories:
+                # カテゴリ選択ボックス
+                category_options = ["すべて"] + categories
+                category_display = {
+                    "すべて": f"すべて ({sum(category_stats.values())}問)"
+                }
+                
+                # 各カテゴリの問題数を表示
+                for cat in categories:
+                    count = category_stats.get(cat, 0)
+                    category_display[cat] = f"{cat} ({count}問)"
+                
+                selected_category = st.selectbox(
+                    "出題するカテゴリを選択してください",
+                    options=category_options,
+                    format_func=lambda x: category_display.get(x, x),
+                    index=category_options.index(st.session_state.selected_category) if st.session_state.selected_category in category_options else 0,
+                    key="category_selector"
+                )
+                
+                # カテゴリが変更された場合の処理
+                if selected_category != st.session_state.selected_category:
+                    st.session_state.selected_category = selected_category
+                    st.session_state.current_question = None  # 現在の問題をリセット
+                    st.session_state.show_result = False
+                    st.session_state.answered_questions.clear()  # 回答済み問題をリセット
+                    st.info(f"📚 カテゴリを「{category_display[selected_category]}」に変更しました")
+                    st.rerun()
+                
+                st.markdown("---")
+            else:
+                st.warning("⚠️ 問題が登録されていません。")
+                st.stop()            # 新しい問題を取得
             if st.session_state.current_question is None:
                 # 既に回答した問題を除外して取得
                 max_attempts = 10
@@ -218,7 +273,14 @@ elif page == "🎲 クイズ":
                 question = None
                 
                 while attempt < max_attempts:
-                    questions = question_service.get_random_questions(limit=5)  # 複数取得して選択
+                    # カテゴリに応じて問題を取得
+                    if st.session_state.selected_category == "すべて":
+                        questions = question_service.get_random_questions(limit=5)  # 複数取得して選択
+                    else:
+                        questions = question_service.get_random_questions_by_category(
+                            st.session_state.selected_category, limit=5
+                        )
+                    
                     if questions:
                         # 未回答の問題を探す
                         for q in questions:
@@ -527,9 +589,8 @@ elif page == "🔧 問題管理":
                 
                 with col1:
                     st.markdown("**生成パラメータ**")
-                    
-                    # 生成パラメータ
-                    gen_col1, gen_col2 = st.columns(2)
+                      # 生成パラメータ
+                    gen_col1, gen_col2, gen_col3 = st.columns(3)
                     
                     with gen_col1:
                         category = st.selectbox(
@@ -547,7 +608,15 @@ elif page == "🔧 問題管理":
                             key="gen_difficulty_tab"
                         )
                     
-                    count = st.slider("生成数", 1, 10, 1, key="gen_count_tab")
+                    with gen_col3:
+                        count = st.slider(
+                            "🔢 生成問題数", 
+                            min_value=1, 
+                            max_value=10, 
+                            value=1, 
+                            key="gen_count_tab",
+                            help="一度に生成する問題の数を指定してください（1-10問）"
+                        )
                     
                     topic = st.text_area(
                         "特定のトピック（任意）",
@@ -558,6 +627,38 @@ elif page == "🔧 問題管理":
                     
                     # 詳細オプション
                     with st.expander("🔧 詳細オプション"):
+                        # AIモデル選択
+                        st.markdown("**🤖 AIモデル選択**")
+                        
+                        # モデル情報を定義
+                        model_options = {
+                            "gpt-3.5-turbo": "GPT-3.5 Turbo (高速・経済的)",
+                            "gpt-4o-mini": "GPT-4o Mini (高品質・バランス)",
+                            "gpt-4o": "GPT-4o (最高品質)",
+                            "gpt-4": "GPT-4 (最高品質・詳細)"
+                        }
+                        
+                        selected_model = st.selectbox(
+                            "使用するAIモデル",
+                            options=list(model_options.keys()),
+                            format_func=lambda x: model_options[x],
+                            index=0,  # デフォルトはgpt-3.5-turbo
+                            help="高品質なモデルほど高コストですが、より詳細で正確な問題を生成します"
+                        )
+                        
+                        # モデル詳細情報
+                        model_info = {
+                            "gpt-3.5-turbo": {"cost": "💰 低", "quality": "⭐⭐⭐", "speed": "🚀 高速"},
+                            "gpt-4o-mini": {"cost": "💰💰 中", "quality": "⭐⭐⭐⭐", "speed": "🚀 高速"},
+                            "gpt-4o": {"cost": "💰💰💰 高", "quality": "⭐⭐⭐⭐⭐", "speed": "🐢 標準"},
+                            "gpt-4": {"cost": "💰💰💰 高", "quality": "⭐⭐⭐⭐⭐", "speed": "🐢 低速"}
+                        }
+                        
+                        info = model_info[selected_model]
+                        st.info(f"**{model_options[selected_model]}**\n\n"
+                               f"コスト: {info['cost']} | 品質: {info['quality']} | 速度: {info['speed']}")
+                        
+                        # 他のオプション
                         include_explanation = st.checkbox("解説を含める", value=True)
                         question_length = st.selectbox(
                             "問題文の長さ",
@@ -582,8 +683,12 @@ elif page == "🔧 問題管理":
                         progress_bar = st.progress(0)
                         status_text = st.empty()
                         
+                        # 選択されたモデルをログに出力
+                        st.info(f"🤖 使用モデル: {selected_model} ({model_options[selected_model]})")
+                        print(f"🎯 User selected model: {selected_model}")
+                        
                         try:
-                            generator = QuestionGenerator(session)
+                            generator = QuestionGenerator(session, model=selected_model)
                               # OpenAI接続確認
                             connection_status = generator.validate_openai_connection()
                             if not connection_status["connected"]:
@@ -636,38 +741,74 @@ elif page == "🔧 問題管理":
                                     progress_callback=update_progress,
                                     delay_between_requests=1.5  # Rate limiting
                                 )
-                            
-                            # 結果表示
+                              # 結果表示
                             progress_container.empty()
                             progress_bar.empty()
                             status_text.empty()
                             
+                            # 共通の成功処理
                             if generated_ids:
-                                st.success(f"✅ {len(generated_ids)}問の問題を生成しました！")
+                                progress_bar.progress(1.0)
+                                status_text.text("PDF処理完了！")
                                 
-                                # 生成履歴に追加
-                                st.session_state.generation_history.append({
-                                    'time': datetime.now().strftime('%H:%M'),
-                                    'count': len(generated_ids),
-                                    'category': category,
-                                    'difficulty': difficulty
-                                })
-                                  # 生成された問題のIDを表示
-                                with st.expander("📋 生成された問題の詳細"):
+                                # プログレス表示を消去
+                                progress_bar.empty()
+                                status_text.empty()
+                                
+                                st.success(f"✅ {len(generated_ids)}問の問題を処理しました！")
+                                
+                                # 統計情報表示
+                                total_choices = 0
+                                for qid in generated_ids:
+                                    choices = choice_service.get_choices_by_question(qid)
+                                    total_choices += len(choices)
+                                
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("問題数", len(generated_ids))
+                                with col2:
+                                    st.metric("選択肢数", total_choices)
+                                with col3:
+                                    avg_choices = total_choices / len(generated_ids) if generated_ids else 0
+                                    st.metric("平均選択肢数", f"{avg_choices:.1f}")
+                                    
+                                # 生成された問題の詳細表示
+                                with st.expander("📋 生成された問題の詳細", expanded=True):
                                     for i, qid in enumerate(generated_ids):
                                         st.markdown(f"### 問題 {i+1} (ID: {qid})")
                                         
-                                        # 生成された問題の詳細を表示
+                                        # 問題の詳細を表示
                                         question = question_service.get_question_by_id(qid)
                                         if question:
                                             st.markdown(f"**タイトル:** {question.title}")
                                             st.markdown(f"**カテゴリ:** {question.category}")
-                                            st.markdown(f"**問題:** {question.content}")
+                                            st.markdown(f"**難易度:** {question.difficulty}")
+                                            st.markdown(f"**問題文:** {question.content}")
+                                            
+                                            # 選択肢を表示
+                                            choices = choice_service.get_choices_by_question(qid)
+                                            if choices:
+                                                st.markdown("**選択肢:**")
+                                                choice_labels = ['A', 'B', 'C', 'D', 'E', 'F']
+                                                for idx, choice in enumerate(sorted(choices, key=lambda x: x.order_num)):
+                                                    label = choice_labels[idx] if idx < len(choice_labels) else str(idx + 1)
+                                                    correct_mark = " ✅" if choice.is_correct else ""
+                                                    st.markdown(f"{label}. {choice.content}{correct_mark}")
+                                            else:
+                                                st.warning("⚠️ 選択肢が見つかりませんでした")
+                                              # 解説表示
                                             if question.explanation:
                                                 st.markdown(f"**解説:** {question.explanation}")
+                                            else:
+                                                st.info("解説は生成されませんでした")
+                                            
                                             st.markdown("---")
+                                    
+                                    # 問題一覧への移動ボタン
+                                    if st.button("📝 問題一覧で確認", type="secondary", use_container_width=True):
+                                        st.info("問題一覧タブで生成された問題を確認できます")
                             else:
-                                st.error("❌ 問題生成に失敗しました。OpenAI APIの制限またはネットワークエラーの可能性があります。")
+                                st.error(f"❌ PDF生成に失敗しました")
                         
                         except Exception as e:
                             progress_container.empty()
@@ -688,7 +829,7 @@ elif page == "🔧 問題管理":
                     pdf_processor = PDFProcessor()
                     
                     if DATABASE_AVAILABLE:
-                        pdf_generator = PDFQuestionGenerator(session)
+                        pdf_generator = PDFQuestionGenerator(session, model_name="gpt-4o-mini")
                         past_extractor = PastQuestionExtractor(session)
                     else:
                         st.warning("⚠️ データベース接続エラーのため、問題の保存ができません。テキスト抽出のみ可能です。")
@@ -769,8 +910,7 @@ elif page == "🔧 問題管理":
                         if not is_valid:
                             st.error(f"❌ {message}")
                             st.stop()
-                        
-                        # ファイル情報表示
+                          # ファイル情報表示
                         col1, col2, col3 = st.columns(3)
                         with col1:
                             st.metric("ファイル名", uploaded_file.name)
@@ -788,7 +928,14 @@ elif page == "🔧 問題管理":
                             col1, col2, col3 = st.columns(3)
                             
                             with col1:
-                                pdf_num_questions = st.slider("生成問題数", 1, 30, 10, key="pdf_num_questions")
+                                pdf_num_questions = st.slider(
+                                    "🔢 生成問題数",
+                                    min_value=1,
+                                    max_value=30,
+                                    value=10,
+                                    key="pdf_num_questions",
+                                    help="PDFから生成する問題の数を指定してください（1-30問）"
+                                )
                             
                             with col2:
                                 pdf_difficulty = st.selectbox(
@@ -804,6 +951,40 @@ elif page == "🔧 問題管理":
 
                             # テキスト抽出オプション
                             with st.expander("🔧 詳細設定"):
+                                # AIモデル選択
+                                st.markdown("**🤖 AIモデル選択**")
+                                
+                                # モデル情報を定義
+                                pdf_model_options = {
+                                    "gpt-3.5-turbo": "GPT-3.5 Turbo (高速・経済的)",
+                                    "gpt-4o-mini": "GPT-4o Mini (高品質・バランス)",
+                                    "gpt-4o": "GPT-4o (最高品質)",
+                                    "gpt-4": "GPT-4 (最高品質・詳細)"
+                                }
+                                
+                                pdf_selected_model = st.selectbox(
+                                    "使用するAIモデル",
+                                    options=list(pdf_model_options.keys()),
+                                    format_func=lambda x: pdf_model_options[x],
+                                    index=1,  # デフォルトはgpt-4o-mini（PDF処理により適している）
+                                    help="PDF処理では高品質なモデルを推奨します。複雑な教材ほど高性能モデルが効果的です",
+                                    key="pdf_model_select"
+                                )
+                                
+                                # モデル詳細情報
+                                pdf_model_info = {
+                                    "gpt-3.5-turbo": {"cost": "💰 低", "quality": "⭐⭐⭐", "speed": "🚀 高速", "pdf_suitability": "📄 基本"},
+                                    "gpt-4o-mini": {"cost": "💰💰 中", "quality": "⭐⭐⭐⭐", "speed": "🚀 高速", "pdf_suitability": "📄 推奨"},
+                                    "gpt-4o": {"cost": "💰💰💰 高", "quality": "⭐⭐⭐⭐⭐", "speed": "🐢 標準", "pdf_suitability": "📄 最適"},
+                                    "gpt-4": {"cost": "💰💰💰 高", "quality": "⭐⭐⭐⭐⭐", "speed": "🐢 低速", "pdf_suitability": "📄 最適"}
+                                }
+                                
+                                pdf_info = pdf_model_info[pdf_selected_model]
+                                st.info(f"**{pdf_model_options[pdf_selected_model]}**\n\n"
+                                       f"コスト: {pdf_info['cost']} | 品質: {pdf_info['quality']} | 速度: {pdf_info['speed']} | PDF処理: {pdf_info['pdf_suitability']}")
+                                
+                                st.markdown("**⚙️ 抽出・生成オプション**")
+                                
                                 extraction_method = st.selectbox(
                                     "テキスト抽出方法",
                                     ["auto", "pypdf2", "pdfplumber"],
@@ -821,8 +1002,7 @@ elif page == "🔧 問題管理":
                                 # 問題生成実行
                             st.markdown("---")
                             button_label = "🎯 PDFから問題を生成"
-                            
-                            # プライバシー保護の確認（問題生成モード）
+                              # プライバシー保護の確認（問題生成モード）
                             privacy_confirmed_gen = st.checkbox(
                                 "🔒 プライバシー保護設定を理解し、PDFの処理に同意します",
                                 help="アップロードされたPDFの内容はOpenAIの学習データとして使用されません。処理完了後、内容はメモリから削除されます。",
@@ -832,12 +1012,23 @@ elif page == "🔧 問題管理":
                         else:  # 過去問抽出モード
                             st.markdown("**📝 過去問抽出設定**")
                             
-                            col1, col2 = st.columns(2)
+                            col1, col2, col3 = st.columns(3)
                             
                             with col1:
                                 pdf_category = st.text_input("カテゴリ名", "過去問", key="past_category")
                             
                             with col2:
+                                # 過去問抽出でも問題数制限を追加
+                                max_extract_questions = st.slider(
+                                    "🔢 抽出問題数上限",
+                                    min_value=1,
+                                    max_value=50,
+                                    value=20,
+                                    key="max_extract_questions",
+                                    help="PDFから抽出する問題数の上限を指定してください（1-50問）"
+                                )
+                            
+                            with col3:
                                 extraction_method = st.selectbox(
                                     "テキスト抽出方法",
                                     ["auto", "pypdf2", "pdfplumber"],
@@ -850,8 +1041,40 @@ elif page == "🔧 問題管理":
                                 )
                             
                             with st.expander("🔧 過去問抽出の詳細設定"):
+                                # AIモデル選択
+                                st.markdown("**🤖 AIモデル選択**")
+                                
+                                # 過去問抽出用モデル選択
+                                past_model_options = {
+                                    "gpt-3.5-turbo": "GPT-3.5 Turbo (高速・経済的)",
+                                    "gpt-4o-mini": "GPT-4o Mini (高品質・バランス)",
+                                    "gpt-4o": "GPT-4o (最高品質)",
+                                    "gpt-4": "GPT-4 (最高品質・詳細)"
+                                }
+                                
+                                past_selected_model = st.selectbox(
+                                    "使用するAIモデル",
+                                    options=list(past_model_options.keys()),
+                                    format_func=lambda x: past_model_options[x],
+                                    index=1,  # デフォルトはgpt-4o-mini
+                                    help="過去問抽出では高精度モデルを推奨します。元の問題を正確に抽出するため",
+                                    key="past_model_select"
+                                )
+                                
+                                # モデル詳細情報
+                                past_model_info = {
+                                    "gpt-3.5-turbo": {"cost": "💰 低", "quality": "⭐⭐⭐", "speed": "🚀 高速", "extraction": "📝 基本"},
+                                    "gpt-4o-mini": {"cost": "💰💰 中", "quality": "⭐⭐⭐⭐", "speed": "🚀 高速", "extraction": "📝 推奨"},
+                                    "gpt-4o": {"cost": "💰💰💰 高", "quality": "⭐⭐⭐⭐⭐", "speed": "🐢 標準", "extraction": "📝 最適"},
+                                    "gpt-4": {"cost": "💰💰💰 高", "quality": "⭐⭐⭐⭐⭐", "speed": "🐢 低速", "extraction": "📝 最適"}
+                                }
+                                
+                                past_info = past_model_info[past_selected_model]
+                                st.info(f"**{past_model_options[past_selected_model]}**\n\n"
+                                       f"コスト: {past_info['cost']} | 品質: {past_info['quality']} | 速度: {past_info['speed']} | 抽出精度: {past_info['extraction']}")
+                                
+                                st.markdown("**📋 過去問抽出について:**")
                                 st.markdown("""
-                                **📋 過去問抽出について:**
                                 - 問題文、選択肢、正解、解説をそのまま抽出
                                 - 元の内容を一切改変しません
                                 - 問題番号で自動分割を試行
@@ -947,8 +1170,7 @@ elif page == "🔧 問題管理":
                                 with col1:
                                     st.metric("抽出文字数", f"{char_count:,}")
                                 with col2:
-                                    st.metric("推定単語数", f"{word_count:,}")
-                                  # プログレスコールバック関数
+                                    st.metric("推定単語数", f"{word_count:,}")                                # プログレスコールバック関数
                                 def pdf_progress_callback(message, progress):
                                     status_text.text(message)
                                     progress_bar.progress(min(progress, 0.95))
@@ -957,6 +1179,9 @@ elif page == "🔧 問題管理":
                                     # 問題生成モード
                                     status_text.text("問題を生成中...")
                                     progress_bar.progress(0.3)
+                                    
+                                    # 選択されたモデルでPDFジェネレーターを再初期化
+                                    pdf_generator = PDFQuestionGenerator(session, model_name=pdf_selected_model)
                                     
                                     try:
                                         generated_ids = pdf_generator.generate_questions_from_pdf(
@@ -978,11 +1203,13 @@ elif page == "🔧 問題管理":
                                     # 過去問抽出モード
                                     status_text.text("過去問を抽出中...")
                                     progress_bar.progress(0.3)
-                                    
+                                      # 選択されたモデルで過去問抽出器を再初期化
+                                    past_extractor = PastQuestionExtractor(session, model_name=past_selected_model)
                                     try:
                                         generated_ids = past_extractor.extract_past_questions_from_pdf(
                                             text=extracted_text,
                                             category=pdf_category,
+                                            max_questions=max_extract_questions,
                                             progress_callback=pdf_progress_callback
                                         )
                                         mode_text = "抽出"
@@ -991,265 +1218,76 @@ elif page == "🔧 問題管理":
                                         st.error(f"ERROR: 過去問抽出エラー: {extract_error}")
                                         status_text.text("過去問抽出に失敗しました")
                                         progress_bar.empty()
-                                        
-                                        # 詳細なエラー診断を表示
-                                        with st.expander("INFO: エラー診断情報", expanded=True):
-                                            st.markdown("### 考えられる原因:")
-                                            
-                                            # APIキーの状態確認
-                                            import os
-                                            api_key = os.getenv("OPENAI_API_KEY")
-                                            if api_key:
-                                                st.success(f"SUCCESS: OpenAI APIキー: 設定済み (sk-proj-...{api_key[-10:]})")
-                                            else:
-                                                st.error("ERROR: OpenAI APIキー: 未設定")
-                                            
-                                            # テキスト統計
-                                            st.markdown(f"**INFO: 抽出されたテキスト長**: {len(extracted_text)} 文字")
-                                            
-                                            # テキスト長の評価
-                                            if len(extracted_text) < 1000:
-                                                st.warning("WARN: テキスト長: 短すぎる可能性があります")
-                                            elif len(extracted_text) > 50000:
-                                                st.warning("WARN: テキスト長: 長すぎる可能性があります")
-                                            else:
-                                                st.success("SUCCESS: テキスト長: 適切な範囲内です")
-                                            
-                                            # 推定単語数
-                                            word_count = len(extracted_text.split())
-                                            st.markdown(f"**INFO: 推定単語数**: {word_count:,}")
-                                            
-                                            # 推奨対処法
-                                            st.markdown("### TIP: 推奨対処法:")
-                                            st.markdown("""
-                                            **API制限の確認:**
-                                            - OpenAI APIの使用量制限を確認
-                                            - レート制限（1分間あたりのリクエスト数）を確認
-                                            
-                                            **PDFの品質確認:**
-                                            - テキストベースのPDF（画像スキャンではない）
-                                            - 問題・選択肢・解説が明確に区別されている
-                                            
-                                            **ネットワーク確認:**
-                                            - インターネット接続が安定している
-                                            - ファイアウォールやプロキシの設定
-                                            
-                                            **再試行:**
-                                            - 少し時間を置いてから再度実行
-                                            - より小さなファイルで試行
-                                            """)
-                                            
-                                            # 抽出テキストのプレビュー
-                                            st.markdown("### INFO: 抽出テキストのプレビュー:")
-                                            preview_text = extracted_text[:2000]
-                                            st.text_area("テキスト内容", preview_text, height=200)
-                                            
-                                            # 検出された問題パターンの分析
-                                            import re
-                                            patterns_found = []
-                                            patterns = [
-                                                (r'【問\s*(\d+)】', '【問1】形式'),
-                                                (r'問題?\s*(\d+)[.．)\s]', '問題1.形式'),
-                                                (r'(\d+)[.．)\s]', '1.形式'),
-                                            ]
-                                            
-                                            for pattern, name in patterns:
-                                                matches = re.findall(pattern, extracted_text, re.IGNORECASE)
-                                                if matches:
-                                                    patterns_found.append(f"SUCCESS: {name}: {len(matches)}箇所")
-                                            
-                                            if patterns_found:
-                                                st.markdown("### INFO: 検出された問題パターン:")
-                                                for pattern in patterns_found:
-                                                    st.markdown(f"- {pattern}")
-                                            else:
-                                                st.warning("WARN: 問題番号パターンが検出されませんでした")
-                                        
                                         st.stop()
-                                
-                                # 完了
-                                progress_bar.progress(1.0)
-                                status_text.text(f"問題{mode_text}完了！")
-                                
-                                if generated_ids:
-                                    st.success(f"✅ {len(generated_ids)}問の問題を{mode_text}しました！")
                                     
-                                    # 生成履歴に追加
-                                    st.session_state.generation_history.append({
-                                        'time': datetime.now().strftime('%H:%M'),
-                                        'count': len(generated_ids),
-                                        'category': pdf_category,
-                                        'difficulty': pdf_difficulty if processing_mode == "🤖 問題生成モード" else "mixed",
-                                        'source': f'PDF: {uploaded_file.name}',
-                                        'mode': mode_text
-                                    })
+                                # 共通の成功処理
+                                if generated_ids:
+                                    progress_bar.progress(1.0)
+                                    status_text.text("PDF処理完了！")
+                                    
+                                    # プログレス表示を消去
+                                    progress_bar.empty()
+                                    status_text.empty()
+                                    
+                                    st.success(f"✅ {len(generated_ids)}問の問題を処理しました！")
+                                    
+                                    # 統計情報表示
+                                    total_choices = 0
+                                    for qid in generated_ids:
+                                        choices = choice_service.get_choices_by_question(qid)
+                                        total_choices += len(choices)
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.metric("問題数", len(generated_ids))
+                                    with col2:
+                                        st.metric("選択肢数", total_choices)
+                                    with col3:
+                                        avg_choices = total_choices / len(generated_ids) if generated_ids else 0
+                                        st.metric("平均選択肢数", f"{avg_choices:.1f}")
                                     
                                     # 生成された問題の詳細表示
-                                    with st.expander(f"📋 {mode_text}された問題の詳細"):
+                                    with st.expander("📋 生成された問題の詳細", expanded=True):
                                         for i, qid in enumerate(generated_ids):
                                             st.markdown(f"### 問題 {i+1} (ID: {qid})")
                                             
+                                            # 問題の詳細を表示
                                             question = question_service.get_question_by_id(qid)
                                             if question:
                                                 st.markdown(f"**タイトル:** {question.title}")
                                                 st.markdown(f"**カテゴリ:** {question.category}")
-                                                st.markdown(f"**問題:** {question.content}")
+                                                st.markdown(f"**難易度:** {question.difficulty}")
+                                                st.markdown(f"**問題文:** {question.content}")
                                                 
-                                                # 選択肢表示
+                                                # 選択肢を表示
                                                 choices = choice_service.get_choices_by_question(qid)
-                                                st.markdown("**選択肢:**")
-                                                for j, choice in enumerate(choices):
-                                                    correct_mark = " ✅" if choice.is_correct else ""
-                                                    st.markdown(f"{chr(65+j)}. {choice.content}{correct_mark}")
+                                                if choices:
+                                                    st.markdown("**選択肢:**")
+                                                    choice_labels = ['A', 'B', 'C', 'D', 'E', 'F']
+                                                    for idx, choice in enumerate(sorted(choices, key=lambda x: x.order_num)):
+                                                        label = choice_labels[idx] if idx < len(choice_labels) else str(idx + 1)
+                                                        correct_mark = " ✅" if choice.is_correct else ""
+                                                        st.markdown(f"{label}. {choice.content}{correct_mark}")
+                                                else:
+                                                    st.warning("⚠️ 選択肢が見つかりませんでした")
                                                 
+                                                # 解説表示
                                                 if question.explanation:
                                                     st.markdown(f"**解説:** {question.explanation}")
-                                                st.markdown("---")
-                                    
-                                    # クイズ開始ボタン
-                                    st.markdown(f"### 🎲 {mode_text}した問題でクイズを開始")
-                                    if st.button("🚀 クイズを開始", use_container_width=True):
-                                        st.session_state.current_question = None
-                                        st.session_state.show_result = False
-                                        st.session_state.user_answer = None
-                                        st.session_state.answered_questions.clear()
-                                        st.session_state.page = "🎲 クイズ"
-                                        st.rerun()
-                                        
+                                                else:
+                                                    st.info("解説は生成されませんでした")
+                                                
+                                                st.markdown("---")                                    # 問題一覧への移動ボタン
+                                    if st.button("📝 問題一覧で確認", type="secondary", use_container_width=True):
+                                        st.info("問題一覧タブで生成された問題を確認できます")
                                 else:
-                                    st.error(f"❌ 問題{mode_text}に失敗しました。")
+                                    st.error("❌ PDF処理に失敗しました")
                                     
-                                    # 詳細なエラー診断情報を表示
-                                    with st.expander("🔍 エラー診断情報", expanded=True):
-                                        st.markdown("### 考えられる原因:")
-                                        
-                                        # APIキーの状態確認
-                                        import os
-                                        api_key = os.getenv("OPENAI_API_KEY")
-                                        if api_key:
-                                            st.success(f"✅ **OpenAI APIキー**: 設定済み ({api_key[:10]}...)")
-                                        else:
-                                            st.error("❌ **OpenAI APIキー**: 未設定")
-                                            st.code("環境変数OPENAI_API_KEYを設定してください", language="bash")
-                                            st.stop()
-                                        
-                                        # 抽出されたテキストの長さを確認
-                                        st.info(f"📊 **抽出されたテキスト長**: {len(extracted_text)} 文字")
-                                        
-                                        if len(extracted_text) < 100:
-                                            st.warning("⚠️ **問題**: 抽出されたテキストが短すぎます（100文字未満）")
-                                            st.markdown("**解決策**: より多くのテキストを含むPDFを使用してください")
-                                        elif len(extracted_text) > 50000:
-                                            st.warning("⚠️ **問題**: 抽出されたテキストが長すぎる可能性があります（50,000文字超）")
-                                            st.markdown("**解決策**: より小さなセクションに分割したPDFを使用してください")
-                                        else:
-                                            st.success(f"✅ **テキスト長**: 適切な範囲内です")
-                                        
-                                        # 推定単語数の表示
-                                        estimated_words = len(extracted_text.split())
-                                        st.info(f"📖 **推定単語数**: {estimated_words:,}")
-                                        
-                                        # 一般的な原因と解決策
-                                        st.markdown("### 💡 推奨対処法:")
-                                        st.markdown("""
-                                        1. **API制限の確認**: 
-                                           - OpenAI APIの使用量制限を確認
-                                           - レート制限（1分間あたりのリクエスト数）を確認
-                                        
-                                        2. **PDFの品質確認**: 
-                                           - テキストベースのPDF（画像スキャンではない）
-                                           - 問題・選択肢・解説が明確に区別されている
-                                        
-                                        3. **ネットワーク確認**: 
-                                           - インターネット接続が安定している
-                                           - ファイアウォールやプロキシの設定
-                                        
-                                        4. **再試行**: 
-                                           - 少し時間を置いてから再度実行
-                                           - より小さなファイルで試行
-                                        """)
-                                        
-                                        # テキストプレビューの表示（過去問抽出モードの場合）
-                                        if processing_mode == "📝 過去問抽出モード":
-                                            st.markdown("### 📋 抽出テキストのプレビュー:")
-                                            preview_text = extracted_text[:1000] + "..." if len(extracted_text) > 1000 else extracted_text
-                                            st.text_area("テキスト内容", preview_text, height=200, disabled=True)
-                                            
-                                            # 問題パターンの検出
-                                            import re
-                                            patterns_found = []
-                                            patterns = [
-                                                (r'【問\s*(\d+)】', '【問1】形式'),
-                                                (r'問題?\s*(\d+)[.．)\s]', '問題1.形式'),
-                                                (r'第\s*(\d+)\s*問[.．\s]', '第1問形式'),
-                                                (r'Q\s*(\d+)[.．)\s]', 'Q1.形式'),
-                                                (r'(\d+)[.．)\s]', '1.形式'),
-                                            ]
-                                            
-                                            for pattern, name in patterns:
-                                                matches = re.findall(pattern, extracted_text, re.IGNORECASE)
-                                                if matches:
-                                                    patterns_found.append(f"✅ {name}: {len(matches)}箇所")
-                                            
-                                            if patterns_found:
-                                                st.markdown("### 🔍 検出された問題パターン:")
-                                                for pattern in patterns_found:
-                                                    st.markdown(f"- {pattern}")
-                                            else:
-                                                st.warning("⚠️ 問題番号パターンが検出されませんでした")
-                                                st.markdown("**ヒント**: 問題が「問1」「【問題1】」「Q1.」などの番号で区切られているか確認してください")
-                                
                             except Exception as e:
                                 progress_bar.empty()
                                 status_text.empty()
-                                st.error(f"❌ エラーが発生しました: {str(e)}")
-                                
-                                # 詳細なエラー情報を表示
-                                with st.expander("🔍 詳細なエラー情報"):
-                                    import traceback
-                                    st.code(traceback.format_exc())
-                                    
+                                st.error(f"❌ PDFファイル処理でエラーが発生しました: {e}")
                                 st.info("💡 ヒント: OpenAI APIキーが正しく設定されているか、PDFが読み取り可能か確認してください。")
-                        
-                        else:
-                            st.info("📎 PDFファイルをアップロードして問題生成を開始してください")
-                            
-                            # 使用例の表示
-                        with st.expander("💡 使用方法とヒント"):
-                            st.markdown("""
-                            **🤖 問題生成モード:**
-                            
-                            📚 **適切なPDF:**
-                            - テキストベースのPDF（画像スキャンではない）
-                            - 明確な章立てや見出しがある
-                            - 専門用語や概念の説明が含まれている
-                            
-                            🎯 **問題生成のコツ:**
-                            - 5-15問程度が最適な生成数
-                            - カテゴリ名を具体的に設定する
-                            - 教材の難易度に合わせて設定する
-                            
-                            ---
-                            
-                            **📝 過去問抽出モード:**
-                            
-                            📄 **適切なPDF:**
-                            - 過去問集や問題集のPDF
-                            - 問題・選択肢・正解・解説が明記されたもの
-                            - 問題番号で区切られた構造
-                            
-                            🎯 **抽出のコツ:**
-                            - 厳密抽出モードを有効にする
-                            - テキストプレビューで構造を確認
-                            - 問題形式が統一されたPDFを使用
-                            - 抽出後は必ず内容を確認
-                            
-                            ---
-                              ⚠️ **共通注意事項:**
-                            - 著作権に注意してください
-                            - 個人学習目的での利用を推奨します
-                            - 生成・抽出された問題は必ず内容を確認してください                            - 過去問は原文のまま利用されます
-                            """)
                 
                 except Exception as e:
                     st.error(f"❌ PDF機能でエラーが発生しました: {e}")

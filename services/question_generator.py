@@ -13,12 +13,15 @@ import time
 class EnhancedQuestionGenerator:
     """Enhanced service for generating and managing AI-generated questions"""
     
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, model: str = "gpt-3.5-turbo"):
+        print(f"🔧 QuestionGenerator initializing with model: {model}")
         self.session = session
         self.question_service = QuestionService(session)
         self.choice_service = ChoiceService(session)
         try:
-            self.openai_service = EnhancedOpenAIService()
+            print(f"🤖 Creating EnhancedOpenAIService with model: {model}")
+            self.openai_service = EnhancedOpenAIService(model=model)
+            print(f"✅ OpenAI service created successfully with model: {self.openai_service.model}")
         except Exception as e:
             print(f"Warning: OpenAI service initialization failed: {e}")
             self.openai_service = None
@@ -68,16 +71,41 @@ class EnhancedQuestionGenerator:
                 category=generated_question.category,
                 explanation=generated_question.explanation,
                 difficulty=generated_question.difficulty
-            )
-            
-            # Create choices
+            )              # Create choices
+            print(f"💾 Saving {len(generated_question.choices)} choices for question {question.id}")
             for i, choice in enumerate(generated_question.choices):
-                self.choice_service.create_choice(
+                print(f"   💾 Saving choice {i+1}: {choice.content[:50]}... (correct: {choice.is_correct})")
+                saved_choice = self.choice_service.create_choice(
                     question_id=question.id,
                     content=choice.content,
                     is_correct=choice.is_correct,
                     order_num=i + 1
                 )
+                print(f"   ✅ Choice saved with ID: {saved_choice.id}")
+            
+            # Verify choices were saved
+            saved_choices = self.choice_service.get_choices_by_question_id(question.id)
+            print(f"🔍 Verification: Found {len(saved_choices)} saved choices")
+            if len(saved_choices) != len(generated_question.choices):
+                print(f"⚠️ Warning: Expected {len(generated_question.choices)} choices, but {len(saved_choices)} were saved")
+                print(f"Generated choices: {[c.content for c in generated_question.choices]}")
+                print(f"Saved choices: {[c.content for c in saved_choices]}")
+            elif len(saved_choices) == 0:
+                print("🔧 No choices found - adding fallback choices")
+                # フォールバック選択肢を追加
+                fallback_choices = self._create_fallback_choices(generated_question.content, generated_question.category)
+                for i, choice_content in enumerate(fallback_choices, 1):
+                    is_correct = (i == 1)  # 最初の選択肢を正解とする
+                    self.choice_service.create_choice(
+                        question_id=question.id,
+                        content=choice_content,
+                        is_correct=is_correct,
+                        order_num=i
+                    )
+                    print(f"   🔧 Fallback choice {i}: {choice_content} (correct: {is_correct})")
+                print("✅ Fallback choices added")
+            else:
+                print(f"✅ Successfully saved {len(saved_choices)} choices for question {question.id}")
             
             if progress_callback:
                 progress_callback("問題生成完了！", 1.0)
@@ -160,8 +188,7 @@ class EnhancedQuestionGenerator:
             if question.category not in stats["categories"]:
                 stats["categories"][question.category] = 0
             stats["categories"][question.category] += 1
-            
-            # Difficulty stats
+              # Difficulty stats
             if question.difficulty not in stats["difficulties"]:
                 stats["difficulties"][question.difficulty] = 0
             stats["difficulties"][question.difficulty] += 1
@@ -178,20 +205,64 @@ class EnhancedQuestionGenerator:
             }
         
         try:
+            print("Validating OpenAI connection...")
             connected = self.openai_service.test_connection()
-            return {
-                "status": "success" if connected else "error",
-                "message": "Connection successful" if connected else "Connection failed",
-                "connected": connected,
-                "usage_info": self.openai_service.get_usage_info()
-            }
+            
+            if connected:
+                print("OpenAI connection validation successful")
+                return {
+                    "status": "success",
+                    "message": "Connection successful",
+                    "connected": True,
+                    "usage_info": self.openai_service.get_usage_info()
+                }
+            else:
+                print("OpenAI connection validation failed")
+                return {
+                    "status": "error",
+                    "message": "Connection failed",
+                    "connected": False
+                }
+                
         except Exception as e:
+            print(f"OpenAI connection validation error: {e}")
             return {
                 "status": "error", 
-                "message": str(e),
+                "message": f"Connection failed: {str(e)}",
                 "connected": False
             }
-
+    
+    def _create_fallback_choices(self, question_content: str, category: str) -> List[str]:
+        """選択肢が生成されなかった場合のフォールバック選択肢を作成"""
+        
+        # カテゴリ別の一般的な選択肢パターン
+        fallback_patterns = {
+            "基本情報技術者": [
+                "選択肢A",
+                "選択肢B", 
+                "選択肢C",
+                "選択肢D"
+            ],
+            "データベース": [
+                "SQL",
+                "NoSQL",
+                "インデックス",
+                "ビュー"
+            ],
+            "ネットワーク": [
+                "TCP/IP",
+                "HTTP",
+                "DNS",
+                "DHCP"
+            ]
+        }
+        
+        # カテゴリに応じたフォールバック選択肢を返す
+        if category in fallback_patterns:
+            return fallback_patterns[category]
+        else:
+            return fallback_patterns["基本情報技術者"]
+    
 
 # Backward compatibility - create an alias
 QuestionGenerator = EnhancedQuestionGenerator

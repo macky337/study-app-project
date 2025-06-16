@@ -12,14 +12,15 @@ from services.enhanced_openai_service import EnhancedOpenAIService
 class PastQuestionExtractor:
     """過去問抽出クラス"""
     
-    def __init__(self, session):
+    def __init__(self, session, model_name="gpt-4o-mini"):
         self.session = session
-        self.openai_service = EnhancedOpenAIService()
+        self.openai_service = EnhancedOpenAIService(model_name=model_name)
     
     def extract_past_questions_from_pdf(
         self,
         text: str,
         category: str = "過去問",
+        max_questions: int = 20,
         progress_callback=None
     ) -> List[int]:
         """PDFテキストから過去問を抽出（改善版）"""        
@@ -37,14 +38,13 @@ class PastQuestionExtractor:
         generated_question_ids = []
         successful_extractions = 0
         failed_extractions = 0
+          # 処理する問題数を制限
+        actual_max_questions = min(len(questions), max_questions)
         
-        # 処理する問題数を制限（大量PDFの場合）
-        max_questions = min(len(questions), 20)  # 最大20問まで
-        
-        for i, question_text in enumerate(questions[:max_questions]):
+        for i, question_text in enumerate(questions[:actual_max_questions]):
             if progress_callback:
-                progress = 0.2 + (0.7 * (i + 1) / max_questions)
-                progress_callback(f"問題 {i+1}/{max_questions} を処理中...", progress)
+                progress = 0.2 + (0.7 * (i + 1) / actual_max_questions)
+                progress_callback(f"問題 {i+1}/{actual_max_questions} を処理中...", progress)
                 
             try:
                 print(f"INFO: 問題{i+1}を処理中... (長さ: {len(question_text)}文字)")

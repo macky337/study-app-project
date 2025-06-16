@@ -12,9 +12,9 @@ from services.enhanced_openai_service import EnhancedOpenAIService
 class PDFQuestionGenerator:
     """PDF問題生成クラス"""
     
-    def __init__(self, session):
+    def __init__(self, session, model_name="gpt-4o-mini"):
         self.session = session
-        self.openai_service = EnhancedOpenAIService()
+        self.openai_service = EnhancedOpenAIService(model_name=model_name)
     
     def generate_questions_from_pdf(
         self,
