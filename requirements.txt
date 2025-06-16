@@ -1,0 +1,9 @@
+streamlit
+sqlmodel
+sqlalchemy
+pydantic
+openai
+python-dotenv
+PyPDF2
+pdfplumber
+requests
