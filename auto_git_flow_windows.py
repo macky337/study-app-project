@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Git自動化フロースクリプト
-コミット・プッシュを自動化し、プロジェクトの変更を管理します
+Windows専用 Git自動化フロースクリプト
+エンコーディング問題を完全に解決した版
 """
 
 import os
@@ -12,38 +12,35 @@ import locale
 from datetime import datetime
 from pathlib import Path
 
-def run_command(command, capture_output=True):
-    """コマンドを実行し、結果を返す"""
+def run_command_windows(command, capture_output=True):
+    """Windows環境でのコマンド実行（エンコーディング問題対応）"""
     try:
-        # Windows環境のエンコーディング問題を解決
-        import locale
-        system_encoding = locale.getpreferredencoding()
+        # Windows環境でのエンコーディング設定
+        env = os.environ.copy()
+        env['PYTHONIOENCODING'] = 'utf-8'
         
-        # Windows cmd.exeでの日本語対応
-        if os.name == 'nt':
-            # Windowsの場合、chcp 65001でUTF-8に設定してからコマンド実行
-            full_command = f'chcp 65001 >nul 2>&1 && {command}'
-        else:
-            full_command = command
-        
-        result = subprocess.run(
-            full_command,
-            shell=True,
-            capture_output=capture_output,
-            text=True,
-            encoding='utf-8' if os.name == 'nt' else system_encoding,
-            errors='replace',  # エラー文字は置換
-            cwd=Path(__file__).parent
-        )
-        if capture_output:
-            stdout = result.stdout.strip() if result.stdout else ""
-            stderr = result.stderr.strip() if result.stderr else ""
-            return result.returncode == 0, stdout, stderr
-        else:
-            return result.returncode == 0, "", ""
-    except UnicodeDecodeError as e:
-        # エンコーディングエラーの場合、cp932で再試行
+        # まずUTF-8で試行
         try:
+            result = subprocess.run(
+                f'chcp 65001 >nul 2>&1 && {command}',
+                shell=True,
+                capture_output=capture_output,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                env=env,
+                cwd=Path(__file__).parent
+            )
+            
+            if capture_output:
+                stdout = result.stdout.strip() if result.stdout else ""
+                stderr = result.stderr.strip() if result.stderr else ""
+                return result.returncode == 0, stdout, stderr
+            else:
+                return result.returncode == 0, "", ""
+                
+        except UnicodeDecodeError:
+            # UTF-8で失敗した場合はcp932で再試行
             result = subprocess.run(
                 command,
                 shell=True,
@@ -51,31 +48,38 @@ def run_command(command, capture_output=True):
                 text=True,
                 encoding='cp932',
                 errors='replace',
+                env=env,
                 cwd=Path(__file__).parent
             )
+            
             if capture_output:
                 stdout = result.stdout.strip() if result.stdout else ""
                 stderr = result.stderr.strip() if result.stderr else ""
+                # cp932で取得した結果をUTF-8に変換
+                try:
+                    stdout = stdout.encode('cp932').decode('utf-8', errors='replace')
+                    stderr = stderr.encode('cp932').decode('utf-8', errors='replace')
+                except:
+                    pass  # 変換に失敗した場合はそのまま使用
                 return result.returncode == 0, stdout, stderr
             else:
                 return result.returncode == 0, "", ""
-        except Exception as e2:
-            return False, "", f"Encoding error: {str(e)} / {str(e2)}"
+                
     except Exception as e:
-        return False, "", str(e)
+        return False, "", f"Command execution error: {str(e)}"
 
 def check_git_status():
     """Gitステータスを確認"""
     print("🔍 Gitステータス確認中...")
     
     # Git初期化確認
-    success, _, _ = run_command("git status")
+    success, _, _ = run_command_windows("git status")
     if not success:
         print("❌ Gitリポジトリが初期化されていません")
         return False
     
     # 変更されたファイルを確認
-    success, output, _ = run_command("git status --porcelain")
+    success, output, _ = run_command_windows("git status --porcelain")
     if success:
         if output:
             print("📝 変更されたファイル:")
@@ -95,7 +99,7 @@ def add_files():
     print("📦 ファイルをステージング中...")
     
     # 全ファイルを追加
-    success, output, error = run_command("git add .")
+    success, output, error = run_command_windows("git add .")
     if success:
         print("✅ ファイルをステージングしました")
         return True
@@ -108,7 +112,7 @@ def create_commit_message():
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     # 変更の種類を検出
-    success, output, _ = run_command("git diff --cached --name-only")
+    success, output, _ = run_command_windows("git diff --cached --name-only")
     if success and output:
         files = output.split('\n')
         
@@ -141,7 +145,9 @@ def commit_changes():
     message = create_commit_message()
     print(f"   コミットメッセージ: {message}")
     
-    success, output, error = run_command(f'git commit -m "{message}"')
+    # コミットメッセージの特殊文字をエスケープ
+    escaped_message = message.replace('"', '\\"')
+    success, output, error = run_command_windows(f'git commit -m "{escaped_message}"')
     if success:
         print("✅ コミットが完了しました")
         return True
@@ -154,12 +160,12 @@ def push_changes():
     print("🚀 リモートリポジトリにプッシュ中...")
     
     # リモートブランチを確認
-    success, output, _ = run_command("git branch -r")
+    success, output, _ = run_command_windows("git branch -r")
     if success and "origin/" in output:
         # 現在のブランチを取得
-        success, branch, _ = run_command("git branch --show-current")
+        success, branch, _ = run_command_windows("git branch --show-current")
         if success and branch:
-            success, output, error = run_command(f"git push origin {branch}")
+            success, output, error = run_command_windows(f"git push origin {branch}")
             if success:
                 print("✅ プッシュが完了しました")
                 return True
@@ -168,7 +174,7 @@ def push_changes():
                 # 初回プッシュの場合
                 if "upstream" in error:
                     print("🔄 上流ブランチを設定してプッシュ中...")
-                    success, _, error = run_command(f"git push -u origin {branch}")
+                    success, _, error = run_command_windows(f"git push -u origin {branch}")
                     if success:
                         print("✅ 上流ブランチ設定付きプッシュが完了しました")
                         return True
@@ -190,12 +196,12 @@ def show_final_status():
     print("📊 最終Git状況:")
     
     # 最新のコミット情報
-    success, output, _ = run_command("git log -1 --oneline")
+    success, output, _ = run_command_windows("git log -1 --oneline")
     if success:
         print(f"   最新コミット: {output}")
     
     # リモート同期状況
-    success, output, _ = run_command("git status -b --porcelain")
+    success, output, _ = run_command_windows("git status -b --porcelain")
     if success:
         lines = output.split('\n')
         for line in lines:
@@ -207,7 +213,7 @@ def show_final_status():
 
 def main():
     """メイン実行フロー"""
-    print("🤖 Git自動化フロー開始")
+    print("🤖 Windows版 Git自動化フロー開始")
     print("="*50)
     
     # 1. Git状況確認
@@ -234,6 +240,16 @@ def main():
     return True
 
 if __name__ == "__main__":
+    # コンソールのエンコーディングを設定
+    try:
+        # Windows環境でのコンソール設定
+        if os.name == 'nt':
+            import codecs
+            sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+            sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+    except:
+        pass  # 設定に失敗した場合は通常通り実行
+    
     try:
         success = main()
         sys.exit(0 if success else 1)
