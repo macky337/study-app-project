@@ -325,30 +325,81 @@ class EnhancedOpenAIService:
             print(f"Error parsing question response: {e}")
             return None
     
-    def test_connection(self) -> bool:
-        """Test the OpenAI API connection"""
+    def test_connection(self) -> Dict[str, any]:
+        """Test the OpenAI API connection with detailed error information"""
         try:
-            print("Testing OpenAI API connection...")
+            print(f"🔍 Testing OpenAI API connection with model: {self.model}")
+            print(f"   API Key: {self.api_key[:10]}...{self.api_key[-4:]}")
+            
+            # Test with a simple request
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": "Hello"}],
+                messages=[{"role": "user", "content": "Test connection"}],
                 max_tokens=5,
-                timeout=30
+                timeout=10  # Shorter timeout for faster feedback
             )
-            print("OpenAI API connection test successful")
-            return True
+            
+            if response and response.choices:
+                print("✅ OpenAI API connection test successful")
+                return {
+                    "success": True,
+                    "message": "接続成功",
+                    "model": self.model,
+                    "response": response.choices[0].message.content[:50] if response.choices[0].message.content else "Empty response"
+                }
+            else:
+                print("⚠️ Connection successful but no response")
+                return {
+                    "success": False,
+                    "error": "No response from API",
+                    "model": self.model
+                }
+                
         except openai.APIConnectionError as e:
-            print(f"Connection test failed - API Connection Error: {e}")
-            return False
+            error_msg = f"API接続エラー: ネットワーク接続を確認してください - {e}"
+            print(f"❌ {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "error_type": "connection",
+                "model": self.model
+            }
         except openai.RateLimitError as e:
-            print(f"Connection test failed - Rate Limit Error: {e}")
-            return False
+            error_msg = f"レート制限エラー: 少し待ってから再試行してください - {e}"
+            print(f"❌ {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "error_type": "rate_limit",
+                "model": self.model
+            }
         except openai.AuthenticationError as e:
-            print(f"Connection test failed - Authentication Error: {e}")
-            return False
+            error_msg = f"認証エラー: APIキーが無効または期限切れです - {e}"
+            print(f"❌ {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "error_type": "authentication",
+                "model": self.model
+            }
+        except openai.BadRequestError as e:
+            error_msg = f"リクエストエラー: モデル名またはパラメータが無効です - {e}"
+            print(f"❌ {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "error_type": "bad_request",
+                "model": self.model
+            }
         except Exception as e:
-            print(f"Connection test failed - General Error: {e}")
-            return False
+            error_msg = f"予期しないエラー: {type(e).__name__}: {e}"
+            print(f"❌ {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "error_type": "unknown",
+                "model": self.model
+            }
     
     def get_usage_info(self) -> Dict:
         """Get API usage information (placeholder for future implementation)"""

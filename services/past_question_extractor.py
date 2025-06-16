@@ -21,7 +21,10 @@ class PastQuestionExtractor:
         text: str,
         category: str = "過去問",
         max_questions: int = 20,
-        progress_callback=None
+        progress_callback=None,
+        enable_duplicate_check: bool = True,
+        similarity_threshold: float = 0.7,
+        duplicate_action: str = "skip"
     ) -> List[int]:
         """PDFテキストから過去問を抽出（改善版）"""        
         if progress_callback:
@@ -93,12 +96,14 @@ class PastQuestionExtractor:
                 if extracted_data:
                     print(f"OK: 問題{i+1}: 抽出成功")
                     successful_extractions += 1
-                    
-                    # データベースに保存
+                      # データベースに保存
                     question_id = self._save_extracted_question(
                         extracted_data, 
                         category,
-                        question_number=i+1
+                        question_number=i+1,
+                        enable_duplicate_check=enable_duplicate_check,
+                        similarity_threshold=similarity_threshold,
+                        duplicate_action=duplicate_action
                     )
                     
                     if question_id:
@@ -603,8 +608,17 @@ class PastQuestionExtractor:
             print(f"   詳細: {traceback.format_exc()}")
             return None
     
-    def _save_extracted_question(self, data: Dict, category: str, question_number: int) -> Optional[int]:
-        """抽出したデータをデータベースに保存"""
+    def _save_extracted_question(
+        self, 
+        data: Dict, 
+        category: str, 
+        question_number: int,
+        enable_duplicate_check: bool = True,
+        enable_content_validation: bool = True,
+        similarity_threshold: float = 0.7,
+        duplicate_action: str = "skip"
+    ) -> Optional[int]:
+        """抽出したデータをデータベースに保存（内容検証機能付き）"""
         
         try:
             from database.operations import QuestionService, ChoiceService
@@ -612,14 +626,101 @@ class PastQuestionExtractor:
             question_service = QuestionService(self.session)
             choice_service = ChoiceService(self.session)
             
-            # 問題を作成
-            question = question_service.create_question(
-                title=f"{category} 問題{question_number}",
-                content=data['question'],
-                category=category,
-                explanation=data['explanation'],
-                difficulty=data.get('difficulty', 'medium')
-            )
+            # 問題データの前処理
+            title = f"{category} 問題{question_number}"
+            content = data['question']
+            explanation = data['explanation']
+            difficulty = data.get('difficulty', 'medium')
+            choices_data = data.get('choices', [])
+            
+            # 内容検証（有効な場合）
+            if enable_content_validation:
+                # 一時的な問題と選択肢を作成して検証
+                temp_question = type('TempQuestion', (), {
+                    'title': title,
+                    'content': content,
+                    'category': category,
+                    'explanation': explanation,
+                    'difficulty': difficulty
+                })()
+                
+                temp_choices = []
+                for choice_data in choices_data:
+                    # 異なるフォーマットに対応
+                    choice_text = choice_data.get('text', choice_data.get('content', ''))
+                    is_correct = choice_data.get('is_correct', False)
+                    
+                    temp_choice = type('TempChoice', (), {
+                        'text': choice_text,
+                        'is_correct': is_correct
+                    })()
+                    temp_choices.append(temp_choice)
+                
+                try:
+                    validation_result = question_service.validate_question_and_choices(temp_question, temp_choices)
+                    
+                    # 重大なエラーがある場合はスキップ
+                    if not validation_result.get("valid", True):
+                        print(f"⚠️ 過去問{question_number}の内容検証失敗: {validation_result.get('errors', [])}")
+                        return None
+                    
+                    # 警告がある場合はログ出力
+                    if validation_result.get("warnings"):
+                        print(f"📋 過去問{question_number}の内容検証警告: {validation_result['warnings']}")
+                        
+                except Exception as e:
+                    print(f"⚠️ 過去問{question_number}の内容検証でエラー: {e}")
+                    # 検証エラーの場合は継続
+            
+            # 重複チェック
+            if enable_duplicate_check:
+                # 重複チェック付きで問題を作成
+                if hasattr(question_service, 'create_question_with_duplicate_check'):
+                    creation_result = question_service.create_question_with_duplicate_check(
+                        title=title,
+                        content=content,
+                        category=category,
+                        explanation=explanation,
+                        difficulty=difficulty,
+                        force_create=(duplicate_action != "skip"),
+                        similarity_threshold=similarity_threshold
+                    )
+                    
+                    if not creation_result.get("success", False):
+                        if duplicate_action == "skip":
+                            print(f"INFO: 問題{question_number} - 重複のためスキップ")
+                            return None
+                        else:  # save_with_warning
+                            print(f"WARNING: 問題{question_number} - 重複の可能性あり、警告付きで保存")
+                            # 通常の作成処理にフォールバック
+                            question = question_service.create_question(
+                                title=title,
+                                content=content,
+                                category=category,
+                                explanation=explanation,
+                                difficulty=difficulty
+                            )
+                    else:
+                        # 重複なしで作成成功
+                        question = creation_result["question"]
+                else:
+                    # フォールバック: 通常の作成
+                    question = question_service.create_question(
+                        title=f"{category} 問題{question_number}",
+                        content=data['question'],
+                        category=category,
+                        explanation=data['explanation'],
+                        difficulty=data.get('difficulty', 'medium')
+                    )
+            else:
+                # 重複チェックなしで作成
+                question = question_service.create_question(
+                    title=f"{category} 問題{question_number}",
+                    content=data['question'],
+                    category=category,
+                    explanation=data['explanation'],
+                    difficulty=data.get('difficulty', 'medium')
+                )
             
             if question:                # 選択肢を作成
                 for i, choice_data in enumerate(data['choices']):

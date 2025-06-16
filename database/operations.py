@@ -49,86 +49,135 @@ class QuestionService:
         statement = select(Question).where(Question.category == category).order_by(func.random()).limit(limit)
         return self.session.exec(statement).all()
     
-    def get_all_categories(self) -> List[str]:
-        """データベースに存在するすべてのカテゴリを取得"""
-        statement = select(Question.category).distinct()
-        categories = self.session.exec(statement).all()
-        return sorted([cat for cat in categories if cat])  # Noneを除外してソート
-    
-    def get_category_stats(self) -> dict:
-        """カテゴリごとの問題数を取得"""
-        statement = select(Question.category, func.count(Question.id)).group_by(Question.category)
-        results = self.session.exec(statement).all()
-        return {category: count for category, count in results if category}
-    
-    def find_duplicate_questions(self, similarity_threshold: float = 0.8) -> List[List[Question]]:
-        """重複する可能性のある問題を検出"""
-        from difflib import SequenceMatcher
+    def validate_question_integrity(self, question_id: int) -> dict:
+        """問題の整合性を検証"""
+        from services.enhanced_openai_service import EnhancedOpenAIService
+        from database.operations import ChoiceService
         
-        all_questions = self.session.exec(select(Question)).all()
-        duplicates = []
-        processed_ids = set()
+        question = self.get_question_by_id(question_id)
+        if not question:
+            return {"valid": False, "errors": ["問題が見つかりません"]}
         
-        for i, question1 in enumerate(all_questions):
-            if question1.id in processed_ids:
-                continue
-                
-            similar_questions = [question1]
+        choice_service = ChoiceService(self.session)
+        choices = choice_service.get_choices_by_question(question_id)
+        
+        validation_result = {
+            "question_id": question_id,
+            "valid": True,
+            "errors": [],
+            "warnings": [],
+            "details": {}
+        }
+        
+        # 基本検証
+        validation_result = self._validate_basic_structure(question, choices, validation_result)
+        
+        # AI検証（オプション）
+        try:
+            ai_validation = self._validate_with_ai(question, choices)
+            validation_result["ai_validation"] = ai_validation
+            if not ai_validation.get("coherent", True):
+                validation_result["warnings"].append("AI検証: 問題と選択肢の関連性が低い可能性があります")
+        except Exception as e:
+            validation_result["warnings"].append(f"AI検証が利用できません: {e}")
+        
+        # 最終判定
+        if validation_result["errors"]:
+            validation_result["valid"] = False
+        
+        return validation_result
+    
+    def _validate_basic_structure(self, question, choices, validation_result):
+        """基本構造の検証"""
+        # 必須フィールドチェック
+        if not question.title or len(question.title.strip()) < 3:
+            validation_result["errors"].append("問題タイトルが短すぎます（3文字以上必要）")
+        
+        if not question.content or len(question.content.strip()) < 5:
+            validation_result["errors"].append("問題文が短すぎます（5文字以上必要）")
+        
+        if not question.category or len(question.category.strip()) < 2:
+            validation_result["errors"].append("カテゴリが設定されていないか短すぎます")
+        
+        # 選択肢チェック
+        if len(choices) < 2:
+            validation_result["errors"].append("選択肢が2個未満です（最低2個必要）")
+        elif len(choices) > 6:
+            validation_result["warnings"].append("選択肢が6個を超えています（推奨: 2-6個）")
+        
+        # 正解チェック
+        correct_choices = [c for c in choices if c.is_correct]
+        if len(correct_choices) == 0:
+            validation_result["errors"].append("正解が設定されていません")
+        elif len(correct_choices) > 1:
+            validation_result["warnings"].append("複数の正解が設定されています")
+        
+        # 選択肢の重複チェック
+        choice_texts = [c.text.strip().lower() for c in choices]
+        if len(choice_texts) != len(set(choice_texts)):
+            validation_result["warnings"].append("重複する選択肢があります")
+        
+        # 選択肢の長さチェック
+        for i, choice in enumerate(choices):
+            if len(choice.text.strip()) < 1:
+                validation_result["errors"].append(f"選択肢{i+1}が空です")
+            elif len(choice.text) > 200:
+                validation_result["warnings"].append(f"選択肢{i+1}が長すぎます（200文字以下推奨）")
+        
+        validation_result["details"]["choice_count"] = len(choices)
+        validation_result["details"]["correct_count"] = len(correct_choices)
+        validation_result["details"]["title_length"] = len(question.title) if question.title else 0
+        validation_result["details"]["content_length"] = len(question.content) if question.content else 0
+        
+        return validation_result
+    
+    def _validate_with_ai(self, question, choices):
+        """AIを使用した高度な検証"""
+        openai_service = EnhancedOpenAIService(model_name="gpt-4o-mini")
+        
+        # 検証用プロンプト
+        choice_text = "\n".join([f"{i+1}. {choice.text}" for i, choice in enumerate(choices)])
+        
+        prompt = f"""以下の問題と選択肢の整合性を検証してください。
+
+問題: {question.title}
+問題文: {question.content}
+カテゴリ: {question.category}
+
+選択肢:
+{choice_text}
+
+以下の点を検証し、JSON形式で回答してください：
+1. 問題文と選択肢の関連性（coherent: true/false）
+2. 選択肢が問題に対して適切か（appropriate: true/false）  
+3. 日本語として自然か（natural: true/false）
+4. 具体的な問題点があれば指摘（issues: [])
+
+回答形式:
+{{
+  "coherent": true/false,
+  "appropriate": true/false,
+  "natural": true/false,
+  "issues": ["問題点1", "問題点2"]
+}}"""
+
+        try:
+            response = openai_service.generate_response(prompt, temperature=0.1)
             
-            for j, question2 in enumerate(all_questions[i+1:], i+1):
-                if question2.id in processed_ids:
-                    continue
-                
-                # タイトルの類似度をチェック
-                title_similarity = SequenceMatcher(None, question1.title.lower(), question2.title.lower()).ratio()
-                
-                # 内容の類似度をチェック
-                content_similarity = SequenceMatcher(None, question1.content.lower(), question2.content.lower()).ratio()
-                
-                # 同じカテゴリで、タイトルまたは内容が類似している場合
-                if (question1.category == question2.category and 
-                    (title_similarity >= similarity_threshold or content_similarity >= similarity_threshold)):
-                    similar_questions.append(question2)
-                    processed_ids.add(question2.id)
+            # JSON解析を試行
+            import json
+            import re
             
-            if len(similar_questions) > 1:
-                duplicates.append(similar_questions)
-                for q in similar_questions:
-                    processed_ids.add(q.id)
-        
-        return duplicates
-    
-    def find_exact_duplicate_questions(self) -> List[List[Question]]:
-        """完全に重複する問題を検出（タイトルと内容が完全一致）"""
-        statement = select(Question).order_by(Question.title, Question.content)
-        all_questions = self.session.exec(statement).all()
-        
-        duplicates = []
-        current_group = []
-        
-        for i, question in enumerate(all_questions):
-            if i == 0:
-                current_group = [question]
+            # JSON部分を抽出
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+                return result
             else:
-                prev_question = all_questions[i-1]
-                # タイトルと内容が完全一致する場合
-                if (question.title.strip().lower() == prev_question.title.strip().lower() and
-                    question.content.strip().lower() == prev_question.content.strip().lower()):
-                    if len(current_group) == 1 and current_group[0].id != prev_question.id:
-                        current_group = [prev_question, question]
-                    elif current_group[-1].id != prev_question.id:
-                        current_group.append(prev_question)
-                    current_group.append(question)
-                else:
-                    if len(current_group) > 1:
-                        duplicates.append(current_group)
-                    current_group = [question]
-        
-        # 最後のグループもチェック
-        if len(current_group) > 1:
-            duplicates.append(current_group)
-        
-        return duplicates
+                return {"error": "AI応答からJSON形式を抽出できませんでした"}
+                
+        except Exception as e:
+            return {"error": f"AI検証エラー: {e}"}
     
     def delete_question(self, question_id: int) -> bool:
         """問題を削除（関連する選択肢・回答も削除）"""

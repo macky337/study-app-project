@@ -57,7 +57,8 @@ class PDFQuestionGenerator:
             
             try:
                 chunk_questions = self._generate_questions_from_chunk(
-                    chunk, current_questions, difficulty, category
+                    chunk, current_questions, difficulty, category,
+                    enable_duplicate_check, similarity_threshold, max_retry_attempts
                 )
                 generated_question_ids.extend(chunk_questions)
             except Exception as e:
@@ -195,8 +196,7 @@ JSONのみを出力し、他の文字は含めないでください。
                 questions_data = json.loads(json_str)
             else:
                 raise ValueError("有効なJSONが見つかりません")
-            
-            # データベースに保存
+              # データベースに保存
             question_ids = []
             for q_data in questions_data.get('questions', []):
                 question_id = self._save_question_to_db(q_data, category, difficulty)
@@ -209,22 +209,100 @@ JSONのみを出力し、他の文字は含めないでください。
             print(f"問題生成エラー: {e}")
             return []
     
-    def _save_question_to_db(self, question_data: Dict, category: str, difficulty: str) -> Optional[int]:
-        """生成された問題をデータベースに保存"""
+    def _save_question_to_db(
+        self, 
+        question_data: Dict, 
+        category: str,
+        difficulty: str,
+        enable_duplicate_check: bool = True,
+        enable_content_validation: bool = True,
+        similarity_threshold: float = 0.7,
+        max_retry_attempts: int = 3
+    ) -> Optional[int]:
+        """生成された問題をデータベースに保存（内容検証機能付き）"""
         try:
             from database.operations import QuestionService, ChoiceService
             
             question_service = QuestionService(self.session)
             choice_service = ChoiceService(self.session)
             
-            # 問題を作成
-            question = question_service.create_question(
-                title=question_data.get('title', 'PDF生成問題'),
-                content=question_data['content'],
-                category=category,
-                explanation=question_data.get('explanation', ''),
-                difficulty=difficulty
-            )
+            # 問題データの前処理
+            title = question_data.get('title', 'PDF生成問題')
+            content = question_data['content']
+            explanation = question_data.get('explanation', '')
+            choices_data = question_data.get('choices', [])
+            
+            # 内容検証（有効な場合）
+            if enable_content_validation:
+                # 一時的な問題と選択肢を作成して検証
+                temp_question = type('TempQuestion', (), {
+                    'title': title,
+                    'content': content,
+                    'category': category,
+                    'explanation': explanation,
+                    'difficulty': difficulty
+                })()
+                
+                temp_choices = []
+                for choice_data in choices_data:
+                    temp_choice = type('TempChoice', (), {
+                        'text': choice_data.get('content', choice_data.get('text', '')),
+                        'is_correct': choice_data.get('is_correct', False)
+                    })()
+                    temp_choices.append(temp_choice)
+                
+                try:
+                    validation_result = question_service.validate_question_and_choices(temp_question, temp_choices)
+                    
+                    # 重大なエラーがある場合はスキップ
+                    if not validation_result.get("valid", True):
+                        print(f"⚠️ PDF問題の内容検証失敗: {validation_result.get('errors', [])}")
+                        return None
+                    
+                    # 警告がある場合はログ出力
+                    if validation_result.get("warnings"):
+                        print(f"📋 PDF問題の内容検証警告: {validation_result['warnings']}")
+                        
+                except Exception as e:
+                    print(f"⚠️ PDF問題の内容検証でエラー: {e}")
+                    # 検証エラーの場合は継続
+            
+            # 重複チェック
+            if enable_duplicate_check:
+                # 重複チェック付きで問題を作成
+                if hasattr(question_service, 'create_question_with_duplicate_check'):
+                    creation_result = question_service.create_question_with_duplicate_check(
+                        title=title,
+                        content=content,
+                        category=category,
+                        explanation=explanation,
+                        difficulty=difficulty,
+                        force_create=False,  # 重複の場合は作成しない
+                        similarity_threshold=similarity_threshold                    )
+                    
+                    if not creation_result.get("success", False):
+                        print(f"INFO: 重複のためスキップ - {creation_result.get('message', 'Unknown reason')}")
+                        return None
+                    
+                    question = creation_result["question"]
+                else:
+                    # フォールバック: 通常の作成
+                    question = question_service.create_question(
+                        title=title,
+                        content=content,
+                        category=category,
+                        explanation=explanation,
+                        difficulty=difficulty
+                    )
+            else:
+                # 重複チェックなしで作成
+                question = question_service.create_question(
+                    title=title,
+                    content=content,
+                    category=category,
+                    explanation=explanation,
+                    difficulty=difficulty
+                )
             
             # 選択肢を作成
             choices = question_data.get('choices', [])

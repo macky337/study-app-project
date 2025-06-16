@@ -662,8 +662,7 @@ elif page == "🔧 問題管理":
                         question_length = st.selectbox(
                             "問題文の長さ",
                             ["short", "medium", "long"],
-                            format_func=lambda x: {"short": "短い", "medium": "標準", "long": "詳細"}[x]
-                        )
+                            format_func=lambda x: {"short": "短い", "medium": "標準", "long": "詳細"}[x]                        )
                         
                         st.markdown("---")
                         st.markdown("**🔍 重複チェック設定**")
@@ -694,6 +693,19 @@ elif page == "🔧 問題管理":
                         else:
                             similarity_threshold = 0.8
                             max_retry_attempts = 0
+                        
+                        st.markdown("---")
+                        st.markdown("**✅ 内容検証機能**")
+                        st.info("""
+                        **自動内容検証が有効です：**
+                        - 📝 問題文と選択肢の関連性チェック
+                        - 🔢 選択肢数の妥当性検証（2-6個推奨）
+                        - ✔️ 正解設定の確認
+                        - 🌍 日本語として自然かのチェック
+                        - 🤖 AI による構造・内容の品質評価
+                        
+                        問題のある場合は自動的に再生成または警告を表示します。
+                        """)
                 
                 with col2:
                     st.markdown("**生成履歴**")
@@ -718,26 +730,56 @@ elif page == "🔧 問題管理":
                         
                         try:
                             generator = QuestionGenerator(session, model=selected_model)
-                              # OpenAI接続確認
+                            
+                            # OpenAI接続確認
+                            st.info("🔍 OpenAI接続を確認中...")
                             connection_status = generator.validate_openai_connection()
+                            
                             if not connection_status["connected"]:
-                                error_message = connection_status['message']
+                                error_message = connection_status.get('message', 'Unknown error')
+                                error_type = connection_status.get('error_type', 'unknown')
+                                model_name = connection_status.get('model', selected_model)
                                 
-                                # クォータ超過エラーの場合、詳細な説明を追加
-                                if "quota" in error_message.lower() or "insufficient_quota" in error_message.lower():
-                                    st.error("❌ **OpenAI APIクォータ超過エラー**")
+                                st.error(f"❌ **OpenAI接続エラー**")
+                                
+                                # エラータイプ別の詳細情報
+                                if error_type == "authentication":
                                     st.markdown("""
-                                    🔧 **解決方法:**
-                                    1. **[OpenAI Platform](https://platform.openai.com)**にログイン
-                                    2. **Billing**セクションで使用量とクレジット残高を確認
-                                    3. 必要に応じてクレジットを追加購入
-                                    4. または、無料クォータがリセットされるまで待機
-                                    
-                                    💡 **代替案:** 手動で問題を作成することも可能です（問題管理ページから）
+                                    🔑 **認証エラー**
+                                    - APIキーが無効または期限切れです
+                                    - [OpenAI Platform](https://platform.openai.com/api-keys)でAPIキーを確認してください
+                                    """)
+                                elif error_type == "rate_limit":
+                                    st.markdown("""
+                                    ⏳ **レート制限エラー**
+                                    - API使用量が上限に達しています
+                                    - 少し待ってから再試行するか、プランをアップグレードしてください
+                                    """)
+                                elif error_type == "connection":
+                                    st.markdown("""
+                                    🌐 **接続エラー**
+                                    - インターネット接続を確認してください
+                                    - ファイアウォールやプロキシの設定を確認してください
+                                    """)
+                                elif "quota" in error_message.lower() or "insufficient_quota" in error_message.lower():
+                                    st.markdown("""
+                                    💳 **クォータ超過エラー**
+                                    - OpenAI APIのクレジット残高を確認してください
+                                    - [OpenAI Platform](https://platform.openai.com/usage)で使用量を確認できます
                                     """)
                                 else:
-                                    st.error(f"❌ OpenAI接続エラー: {error_message}")
-                                    st.info("💡 **ヒント:** OpenAI APIキーが正しく設定されているか確認してください")
+                                    st.markdown(f"""
+                                    ⚠️ **一般エラー**
+                                    - エラータイプ: `{error_type}`
+                                    - 使用モデル: `{model_name}`
+                                    """)
+                                
+                                # 詳細なエラーメッセージ
+                                with st.expander("詳細なエラー情報"):
+                                    st.code(error_message)
+                                    st.json(connection_status)
+                                
+                                st.info("💡 **代替案:** 手動で問題を作成することも可能です（問題管理ページから）")
                                 st.stop()
                             
                             generated_ids = []
@@ -746,17 +788,16 @@ elif page == "🔧 問題管理":
                                 status_text.text(message)
                                 progress_bar.progress(progress)
                             
-                            if count == 1:
-                                # 単一問題生成
+                            if count == 1:                                # 単一問題生成
                                 question_id = generator.generate_and_save_question(
                                     category=category,
                                     difficulty=difficulty,
                                     topic=topic if topic else None,
                                     progress_callback=update_progress,
                                     enable_duplicate_check=enable_duplicate_check,
+                                    enable_content_validation=True,  # 内容検証を有効化
                                     similarity_threshold=similarity_threshold,
-                                    max_retry_attempts=max_retry_attempts
-                                )
+                                    max_retry_attempts=max_retry_attempts                                )
                                 
                                 if question_id:
                                     generated_ids.append(question_id)
@@ -771,6 +812,7 @@ elif page == "🔧 問題管理":
                                     progress_callback=update_progress,
                                     delay_between_requests=1.5,  # Rate limiting
                                     enable_duplicate_check=enable_duplicate_check,
+                                    enable_content_validation=True,  # 内容検証を有効化
                                     similarity_threshold=similarity_threshold,
                                     max_retry_attempts=max_retry_attempts
                                 )

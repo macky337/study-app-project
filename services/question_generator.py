@@ -33,11 +33,12 @@ class EnhancedQuestionGenerator:
         topic: Optional[str] = None,
         progress_callback: Optional[callable] = None,
         enable_duplicate_check: bool = True,
+        enable_content_validation: bool = True,
         similarity_threshold: float = 0.8,
         max_retry_attempts: int = 3
     ) -> Optional[int]:
         """
-        Generate a question using OpenAI and save to database with progress callback and duplicate checking
+        Generate a question using OpenAI and save to database with progress callback, duplicate checking and content validation
         
         Args:
             category: 問題カテゴリ
@@ -45,6 +46,7 @@ class EnhancedQuestionGenerator:
             topic: 特定のトピック
             progress_callback: 進捗コールバック関数
             enable_duplicate_check: 重複チェックを有効にするか
+            enable_content_validation: 内容検証を有効にするか
             similarity_threshold: 類似度閾値
             max_retry_attempts: 重複時の最大再試行回数
         
@@ -57,6 +59,8 @@ class EnhancedQuestionGenerator:
             return None
         
         retry_count = 0
+        validation_retry_count = 0
+        max_validation_retries = 2
         
         while retry_count <= max_retry_attempts:
             if progress_callback:
@@ -76,6 +80,53 @@ class EnhancedQuestionGenerator:
                 if progress_callback:
                     progress_callback("問題生成に失敗しました", 0.0)
                 return None
+            
+            # 内容検証（有効な場合）
+            if enable_content_validation:
+                if progress_callback:
+                    progress_callback("問題内容を検証中...", 0.3)
+                
+                # 一時的な問題と選択肢を作成して検証
+                temp_question = type('TempQuestion', (), {
+                    'title': generated_question.title,
+                    'content': generated_question.content,
+                    'category': generated_question.category,
+                    'explanation': generated_question.explanation,
+                    'difficulty': generated_question.difficulty
+                })()
+                
+                temp_choices = []
+                for choice in generated_question.choices:
+                    temp_choice = type('TempChoice', (), {
+                        'text': choice.content,
+                        'is_correct': choice.is_correct
+                    })()
+                    temp_choices.append(temp_choice)
+                
+                try:
+                    validation_result = self.question_service.validate_question_and_choices(temp_question, temp_choices)
+                    
+                    # 重大なエラーがある場合は再生成
+                    if not validation_result["valid"]:
+                        print(f"⚠️ 内容検証失敗: {validation_result['errors']}")
+                        if validation_retry_count < max_validation_retries:
+                            validation_retry_count += 1
+                            if progress_callback:
+                                progress_callback(f"内容不正 - 再生成中... ({validation_retry_count}/{max_validation_retries})", 0.2)
+                            continue
+                        else:
+                            # 最大検証再試行回数に達した場合は警告付きで継続
+                            print(f"🔄 内容検証の最大再試行回数に達しました。警告付きで作成します。")
+                            if progress_callback:
+                                progress_callback("内容検証を継続...", 0.35)
+                    
+                    # 警告がある場合はログ出力
+                    if validation_result["warnings"]:
+                        print(f"📋 内容検証警告: {validation_result['warnings']}")
+                        
+                except Exception as e:
+                    print(f"⚠️ 内容検証でエラー: {e}")
+                    # 検証エラーの場合は継続
             
             # 重複チェック（有効な場合）
             if enable_duplicate_check:
@@ -160,8 +211,7 @@ class EnhancedQuestionGenerator:
                     progress_callback(f"保存エラー: {e}", 0.0)
                 return None
         
-        # すべての試行が失敗した場合        if progress_callback:
-            progress_callback("問題生成に失敗しました", 0.0)
+        # すべての試行が失敗した場合        if progress_callback:            progress_callback("問題生成に失敗しました", 0.0)
         return None
     
     def generate_and_save_multiple_questions(
@@ -173,14 +223,16 @@ class EnhancedQuestionGenerator:
         progress_callback: Optional[callable] = None,
         delay_between_requests: float = 1.0,
         enable_duplicate_check: bool = True,
+        enable_content_validation: bool = True,
         similarity_threshold: float = 0.8,
         max_retry_attempts: int = 3
     ) -> List[int]:
         """
-        Generate multiple questions and save to database with progress tracking and duplicate checking
+        Generate multiple questions and save to database with progress tracking, duplicate checking and content validation
         
         Args:
             enable_duplicate_check: 重複チェックを有効にするか
+            enable_content_validation: 内容検証を有効にするか
             similarity_threshold: 類似度閾値
             max_retry_attempts: 重複時の最大再試行回数
         
@@ -203,7 +255,6 @@ class EnhancedQuestionGenerator:
                     progress_callback(f"問題 {i+1}/{count} を生成中（重複チェック有効）...", progress)
                 else:
                     progress_callback(f"問題 {i+1}/{count} を生成中...", progress)
-            
             topic = topics[i] if topics and i < len(topics) else None
             
             question_id = self.generate_and_save_question(
@@ -212,6 +263,7 @@ class EnhancedQuestionGenerator:
                 topic=topic,
                 progress_callback=None,  # 個別の進捗は表示しない
                 enable_duplicate_check=enable_duplicate_check,
+                enable_content_validation=enable_content_validation,
                 similarity_threshold=similarity_threshold,
                 max_retry_attempts=max_retry_attempts
             )
@@ -249,14 +301,14 @@ class EnhancedQuestionGenerator:
             "difficulties": {},
             "openai_available": self.openai_service is not None
         }
-        
-        # Count by category and difficulty
+          # Count by category and difficulty
         for question in all_questions:
             # Category stats
             if question.category not in stats["categories"]:
                 stats["categories"][question.category] = 0
             stats["categories"][question.category] += 1
-              # Difficulty stats
+            
+            # Difficulty stats
             if question.difficulty not in stats["difficulties"]:
                 stats["difficulties"][question.difficulty] = 0
             stats["difficulties"][question.difficulty] += 1
@@ -273,31 +325,38 @@ class EnhancedQuestionGenerator:
             }
         
         try:
-            print("Validating OpenAI connection...")
-            connected = self.openai_service.test_connection()
+            print("🔍 Validating OpenAI connection...")
+            test_result = self.openai_service.test_connection()
             
-            if connected:
-                print("OpenAI connection validation successful")
+            if test_result.get("success", False):
+                print("✅ OpenAI connection validation successful")
                 return {
                     "status": "success",
-                    "message": "Connection successful",
+                    "message": test_result.get("message", "Connection successful"),
                     "connected": True,
+                    "model": test_result.get("model", "unknown"),
                     "usage_info": self.openai_service.get_usage_info()
                 }
             else:
-                print("OpenAI connection validation failed")
+                error_message = test_result.get("error", "Connection failed")
+                error_type = test_result.get("error_type", "unknown")
+                
+                print(f"❌ OpenAI connection validation failed: {error_message}")
                 return {
                     "status": "error",
-                    "message": "Connection failed",
-                    "connected": False
+                    "message": error_message,
+                    "connected": False,
+                    "error_type": error_type,
+                    "model": test_result.get("model", "unknown")
                 }
-                
         except Exception as e:
-            print(f"OpenAI connection validation error: {e}")
+            error_message = f"Connection validation error: {e}"
+            print(f"❌ {error_message}")
             return {
-                "status": "error", 
-                "message": f"Connection failed: {str(e)}",
-                "connected": False
+                "status": "error",
+                "message": error_message,
+                "connected": False,
+                "error_type": "validation_error"
             }
     
     def _create_fallback_choices(self, question_content: str, category: str) -> List[str]:
