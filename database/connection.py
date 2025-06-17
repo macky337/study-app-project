@@ -111,10 +111,11 @@ else:
         engine = None
 
 
-def get_session():
-    """Get database session"""
-    with Session(engine) as session:
-        yield session
+def get_database_session():
+    """安全なDBセッション生成（都度使い捨て）"""
+    if engine is None:
+        raise RuntimeError("DBエンジンが初期化されていません")
+    return Session(engine)
 
 
 def create_tables():

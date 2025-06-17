@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from database.connection import get_session
+from database.connection import get_database_session
 from models.question import Question
 from models.choice import Choice
 
@@ -19,7 +19,7 @@ def check_specific_question():
     print("=" * 50)
     
     try:
-        session = get_session()
+        session = get_database_session()
         
         # 問題8または問題9に関連する問題を検索
         questions = session.query(Question).filter(

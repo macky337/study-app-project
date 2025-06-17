@@ -138,7 +138,7 @@ def test_past_question_extractor():
             return False
         
         # 過去問抽出器の初期化
-        extractor = PastQuestionExtractor(session, model_name="gpt-3.5-turbo")
+        extractor = PastQuestionExtractor(model_name="gpt-3.5-turbo")
         print("✅ PastQuestionExtractor 初期化成功")
         
         return True

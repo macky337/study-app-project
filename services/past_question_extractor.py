@@ -7,13 +7,13 @@ from typing import List, Dict, Optional, Tuple
 import json
 import re
 from services.enhanced_openai_service import EnhancedOpenAIService
+from database.operations import QuestionService, ChoiceService
 
 
 class PastQuestionExtractor:
     """過去問抽出クラス"""
     
-    def __init__(self, session, model_name="gpt-4o"):  # より強力なモデルに変更
-        self.session = session
+    def __init__(self, model_name="gpt-4o"):  # より強力なモデルに変更
         self.openai_service = EnhancedOpenAIService(model_name=model_name)
     
     def extract_past_questions_from_pdf(
@@ -97,21 +97,27 @@ class PastQuestionExtractor:
                         print(f"OK: 問題{i+1}: 抽出成功")
                         successful_extractions += 1
                         # データベースに保存
-                        question_id = self._save_extracted_question(
-                            extracted_data, 
-                            category,
-                            question_number=i+1,
-                            enable_duplicate_check=enable_duplicate_check,
-                            similarity_threshold=similarity_threshold,
-                            duplicate_action=duplicate_action
-                        )
-                        if question_id and question_id != "SKIPPED_DUPLICATE":
-                            generated_question_ids.append(question_id)
-                            print(f"SAVED: 問題{i+1}: DB保存成功 (ID: {question_id})")
-                        elif question_id == "SKIPPED_DUPLICATE":
-                            print(f"SKIPPED: 問題{i+1}: 重複のためスキップ")
+                        print(f"DEBUG: extracted_data内容: {extracted_data} (type: {type(extracted_data)})")
+                        if extracted_data:
+                            question_id = self._save_extracted_question(
+                                extracted_data, 
+                                category,
+                                question_number=i+1,
+                                enable_duplicate_check=enable_duplicate_check,
+                                similarity_threshold=similarity_threshold,
+                                duplicate_action=duplicate_action
+                            )
+                            if question_id and question_id != "SKIPPED_DUPLICATE":
+                                generated_question_ids.append(question_id)
+                                print(f"SAVED: 問題{i+1}: DB保存成功 (ID: {question_id})")
+                            elif question_id == "SKIPPED_DUPLICATE":
+                                print(f"SKIPPED: 問題{i+1}: 重複のためスキップ")
+                            else:
+                                print(f"ERROR: 問題{i+1}: DB保存失敗。バリデーション・重複・DBエラーのいずれか。詳細は直前のログを参照")
                         else:
-                            print(f"ERROR: 問題{i+1}: DB保存失敗")
+                            print(f"DEBUG: extracted_dataが偽値と判定されました: {extracted_data} (type: {type(extracted_data)})")
+                            print(f"ERROR: 問題{i+1}: 抽出失敗 - データが不正またはAPI応答なし")
+                            failed_extractions += 1
                 else:
                     print(f"ERROR: 問題{i+1}: 抽出失敗 - データが不正またはAPI応答なし")
                     failed_extractions += 1
@@ -693,56 +699,56 @@ JSON形式で回答（例）:
         """抽出したデータをデータベースに保存（内容検証機能付き）"""
         
         try:
-            from database.operations import QuestionService, ChoiceService
+            from database.connection import get_database_session
+            with get_database_session() as session:
+                question_service = QuestionService(session)
+                choice_service = ChoiceService(session)
             
-            question_service = QuestionService(self.session)
-            choice_service = ChoiceService(self.session)
-            
-            # 問題データの前処理
-            title = f"{category} 問題{question_number}"
-            content = data['question']
-            explanation = data['explanation']
-            difficulty = data.get('difficulty', 'medium')
-            choices_data = data.get('choices', [])
-            
-            # 内容検証（有効な場合）
-            if enable_content_validation:
-                # 一時的な問題と選択肢を作成して検証
-                temp_question = type('TempQuestion', (), {
-                    'title': title,
-                    'content': content,
-                    'category': category,
-                    'explanation': explanation,
-                    'difficulty': difficulty
-                })()
+                # 問題データの前処理
+                title = f"{category} 問題{question_number}"
+                content = data['question']
+                explanation = data['explanation']
+                difficulty = data.get('difficulty', 'medium')
+                choices_data = data.get('choices', [])
                 
-                temp_choices = []
-                for choice_data in choices_data:
-                    # 異なるフォーマットに対応
-                    choice_text = choice_data.get('text', choice_data.get('content', ''))
-                    is_correct = choice_data.get('is_correct', False)
-                    
-                    temp_choice = type('TempChoice', (), {
-                        'text': choice_text,
-                        'is_correct': is_correct
+                # 内容検証（有効な場合）
+                if enable_content_validation:
+                    # 一時的な問題と選択肢を作成して検証
+                    temp_question = type('TempQuestion', (), {
+                        'title': title,
+                        'content': content,
+                        'category': category,
+                        'explanation': explanation,
+                        'difficulty': difficulty
                     })()
-                    temp_choices.append(temp_choice)
-                
-                try:
-                    validation_result = question_service.validate_question_and_choices(temp_question, temp_choices)
                     
-                    # 重大なエラーがある場合はスキップ
-                    if not validation_result.get("valid", True):
-                        print(f"⚠️ 過去問{question_number}の内容検証失敗: {validation_result.get('errors', [])}")
-                        return None
-                    
-                    # 警告がある場合はログ出力
-                    if validation_result.get("warnings"):
-                        print(f"📋 過去問{question_number}の内容検証警告: {validation_result['warnings']}")
+                    temp_choices = []
+                    for choice_data in choices_data:
+                        # 異なるフォーマットに対応
+                        choice_text = choice_data.get('text', choice_data.get('content', ''))
+                        is_correct = choice_data.get('is_correct', False)
                         
-                except Exception as e:
-                    print(f"⚠️ 過去問{question_number}の内容検証でエラー: {e}")
-                    # 検証エラーの場合は継続
+                        temp_choice = type('TempChoice', (), {
+                            'text': choice_text,
+                            'is_correct': is_correct
+                        })()
+                        temp_choices.append(temp_choice)
+                    
+                    try:
+                        validation_result = question_service.validate_question_and_choices(temp_question, temp_choices)
+                        
+                        # 重大なエラーがある場合はスキップ
+                        if not validation_result.get("valid", True):
+                            print(f"⚠️ 過去問{question_number}の内容検証失敗: {validation_result.get('errors', [])}")
+                            return None
+                        
+                        # 警告がある場合はログ出力
+                        if validation_result.get("warnings"):
+                            print(f"📋 過去問{question_number}の内容検証警告: {validation_result['warnings']}")
+                            
+                    except Exception as e:
+                        print(f"⚠️ 過去問{question_number}の内容検証でエラー: {e}")
+                        # 検証エラーの場合は継続
               # 重複チェック
             if enable_duplicate_check:
                 # 重複チェック付きで問題を作成
@@ -756,8 +762,11 @@ JSON形式で回答（例）:
                         force_create=(duplicate_action != "skip"),
                         similarity_threshold=similarity_threshold
                     )
-                    
+                    print(f"DEBUG: create_question_with_duplicate_check result: {creation_result}")
+                    print(f"DEBUG: message: {creation_result.get('message')}")
+                    print(f"DEBUG: duplicate_check: {creation_result.get('duplicate_check')}")
                     if not creation_result.get("success", False):
+                        print(f"ERROR: 問題{question_number}: DB保存失敗 - {creation_result.get('message')}\n  duplicate_check: {creation_result.get('duplicate_check')}\n  error detail: {creation_result.get('error', 'no error info')}")
                         if duplicate_action == "skip":
                             print(f"INFO: 問題{question_number} - 重複のためスキップ")
                             return "SKIPPED_DUPLICATE"  # 重複でスキップしたことを明示
@@ -771,9 +780,13 @@ JSON形式で回答（例）:
                                 explanation=explanation,
                                 difficulty=difficulty
                             )
+                            print(f"DEBUG: create_question fallback result: {question}")
+                            if question is None:
+                                print(f"ERROR: 問題{question_number}: create_question fallbackでも保存失敗")
                     else:
                         # 重複なしで作成成功
                         question = creation_result["question"]
+                        print(f"DEBUG: create_question_with_duplicate_check success, question: {question}")
                 else:
                     # フォールバック: 通常の作成
                     question = question_service.create_question(
@@ -783,6 +796,7 @@ JSON形式で回答（例）:
                         explanation=data['explanation'],
                         difficulty=data.get('difficulty', 'medium')
                     )
+                    print(f"DEBUG: create_question fallback result: {question}")
             else:
                 # 重複チェックなしで作成
                 question = question_service.create_question(

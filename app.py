@@ -931,7 +931,7 @@ elif page == "🔧 問題管理":
                     if DATABASE_AVAILABLE:
                         try:
                             pdf_generator = PDFQuestionGenerator(session, model_name="gpt-4o-mini")
-                            past_extractor = PastQuestionExtractor(session)
+                            past_extractor = PastQuestionExtractor()
                             st.success("✅ 問題生成エンジン初期化完了")
                         except Exception as gen_error:
                             st.error(f"❌ 問題生成エンジンの初期化に失敗しました: {gen_error}")
@@ -1441,7 +1441,7 @@ elif page == "🔧 問題管理":
                                     status_text.text("過去問を抽出中...")
                                     progress_bar.progress(0.3)
                                       # 選択されたモデルで過去問抽出器を再初期化
-                                    past_extractor = PastQuestionExtractor(session, model_name=past_selected_model)
+                                    past_extractor = PastQuestionExtractor(model_name=past_selected_model)
                                     
                                     try:
                                         st.info(f"📝 {past_selected_model} を使用して過去問抽出を開始します...")

@@ -16,19 +16,25 @@ class QuestionService:
         category: str,
         explanation: Optional[str] = None,
         difficulty: str = "medium"
-    ) -> Question:
-        """新しい問題を作成"""
-        question = Question(
-            title=title,
-            content=content,
-            category=category,
-            explanation=explanation,
-            difficulty=difficulty
-        )
-        self.session.add(question)
-        self.session.commit()
-        self.session.refresh(question)
-        return question
+    ) -> Optional[Question]:
+        """新しい問題を作成（例外時はエラー内容をprint）"""
+        try:
+            question = Question(
+                title=title,
+                content=content,
+                category=category,
+                explanation=explanation,
+                difficulty=difficulty
+            )
+            self.session.add(question)
+            self.session.commit()
+            self.session.refresh(question)
+            return question
+        except Exception as e:
+            print(f"❌ create_question DB保存エラー: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return None
     
     def get_question_by_id(self, question_id: int) -> Optional[Question]:
         """IDで問題を取得"""
@@ -385,6 +391,7 @@ class QuestionService:
         
         # 強制作成フラグがない場合、重複度が高いと作成拒否
         if not force_create and duplicate_check["is_duplicate"]:
+            print(f"[DEBUG] create_question_with_duplicate_check: 重複判定で作成拒否: {duplicate_check['recommendation']}")
             return {
                 "success": False,
                 "question": None,
@@ -412,8 +419,10 @@ class QuestionService:
                 "duplicate_check": duplicate_check,
                 "message": message
             }
-            
         except Exception as e:
+            print(f"[DEBUG] create_question_with_duplicate_check: 例外発生: {e}")
+            import traceback
+            print(traceback.format_exc())
             return {
                 "success": False,
                 "question": None,

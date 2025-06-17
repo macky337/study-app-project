@@ -16,7 +16,7 @@ def create_pdf_tab(tab3, session, question_service, choice_service):
             if session:
                 # デフォルトモデルで初期化（後で選択モデルで再初期化）
                 pdf_generator = PDFQuestionGenerator(session, model_name="gpt-4o-mini")
-                past_extractor = PastQuestionExtractor(session, model_name="gpt-4o-mini")
+                past_extractor = PastQuestionExtractor(model_name="gpt-4o-mini")
             else:
                 st.warning("⚠️ データベース接続エラーのため、問題の保存ができません。")
                 return
@@ -284,7 +284,7 @@ def create_pdf_tab(tab3, session, question_service, choice_service):
                             
                         else:  # 過去問抽出モード
                             # 選択されたモデルで過去問抽出器を再初期化
-                            past_extractor = PastQuestionExtractor(session, model_name=past_selected_model)
+                            past_extractor = PastQuestionExtractor(model_name=past_selected_model)
                             
                             # 過去問抽出実行
                             status_text.text("過去問を抽出中...")

@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from database.connection import get_session
+from database.connection import get_database_session
 from models.question import Question
 from models.choice import Choice
 import re
@@ -19,7 +19,7 @@ def auto_fix_choices():
     print("選択肢自動修正を開始...")
     
     try:
-        session = get_session()
+        session = get_database_session()
         
         # 選択肢がない問題を検索・修正
         questions = session.query(Question).all()
@@ -133,7 +133,7 @@ def verify_fix():
     print("\n修正結果確認...")
     
     try:
-        session = get_session()
+        session = get_database_session()
         
         questions = session.query(Question).all()
         no_choice_count = 0
