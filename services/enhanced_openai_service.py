@@ -88,16 +88,21 @@ class EnhancedOpenAIService:
         self.model = selected_model
         print(f"Using model: {self.model} ({self.AVAILABLE_MODELS[self.model]['name']})")
         
-        # Initialize OpenAI client with error handling
+        # Initialize OpenAI client with enhanced connection settings
         try:
-            self.client = OpenAI(api_key=self.api_key)
+            self.client = OpenAI(
+                api_key=self.api_key,
+                timeout=60.0,  # 60秒のタイムアウト
+                max_retries=3,  # 内蔵リトライ機能
+                base_url="https://api.openai.com/v1"  # 明示的なエンドポイント
+            )
             print("OpenAI client initialized successfully")
         except Exception as e:
             print(f"ERROR: Failed to initialize OpenAI client: {e}")
             raise ConnectionError(f"Failed to initialize OpenAI client: {e}")
         
-        self.max_retries = 3
-        self.retry_delay = 1.0
+        self.max_retries = 5  # リトライ回数を増加
+        self.retry_delay = 2.0  # 初期遅延を増加
     
     def generate_question(
         self,
@@ -326,27 +331,50 @@ class EnhancedOpenAIService:
             print(f"Error parsing question response: {e}")
             return None
     
+    @backoff.on_exception(
+        backoff.expo,
+        (openai.RateLimitError, openai.APIConnectionError, openai.APITimeoutError),
+        max_tries=5,
+        max_time=120
+    )
     def test_connection(self) -> Dict[str, any]:
-        """Test the OpenAI API connection with detailed error information"""
+        """Test the OpenAI API connection with enhanced error handling and retries"""
         try:
             print(f"🔍 Testing OpenAI API connection with model: {self.model}")
             print(f"   API Key: {self.api_key[:10]}...{self.api_key[-4:]}")
             
+            # まずネットワーク接続をテスト
+            print("🌐 Testing network connectivity to api.openai.com...")
+            try:
+                import socket
+                socket.create_connection(("api.openai.com", 443), timeout=10)
+                print("✅ Network connectivity OK")
+            except Exception as network_error:
+                print(f"❌ Network connectivity failed: {network_error}")
+                return {
+                    "success": False,
+                    "error": f"ネットワーク接続エラー: {network_error}",
+                    "error_type": "network",
+                    "model": self.model
+                }
+            
             # Test with a simple request
+            print("🤖 Sending test request to OpenAI API...")
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=[{"role": "user", "content": "Test connection"}],
-                max_tokens=5,
-                timeout=10  # Shorter timeout for faster feedback
+                messages=[{"role": "user", "content": "Test connection - respond with 'OK'"}],
+                max_tokens=10,
+                timeout=15
             )
             
             if response and response.choices:
-                print("✅ OpenAI API connection test successful")
+                response_content = response.choices[0].message.content
+                print(f"✅ OpenAI API connection test successful: {response_content}")
                 return {
                     "success": True,
                     "message": "接続成功",
                     "model": self.model,
-                    "response": response.choices[0].message.content[:50] if response.choices[0].message.content else "Empty response"
+                    "response": response_content[:50] if response_content else "Empty response"
                 }
             else:
                 print("⚠️ Connection successful but no response")
@@ -390,6 +418,15 @@ class EnhancedOpenAIService:
                 "success": False,
                 "error": error_msg,
                 "error_type": "bad_request",
+                "model": self.model
+            }
+        except openai.APITimeoutError as e:
+            error_msg = f"タイムアウトエラー: API応答が遅すぎます - {e}"
+            print(f"❌ {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "error_type": "timeout",
                 "model": self.model
             }
         except Exception as e:
