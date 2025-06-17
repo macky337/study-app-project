@@ -2,18 +2,17 @@
 # Pythonアプリとして認識
 runtime = "python"
 
-# Nixpacks configuration for Python Streamlit app
-[[phases.setup]]
+[setup]
 commands = [
   "python -m pip install --upgrade pip"
 ]
 
-[[phases.install]]
+[install]
 commands = [
   "pip install --no-cache-dir -r requirements.txt"
 ]
 
-[[phases.build]]
+[build]
 commands = []
 
 [[services]]
