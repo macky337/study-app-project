@@ -11,20 +11,18 @@ from services.enhanced_openai_service import EnhancedOpenAIService
 
 class PastQuestionExtractor:
     """過去問抽出クラス"""
-    
-    def __init__(self, session, model_name="gpt-4o-mini"):
+      def __init__(self, session, model_name="gpt-4o"):  # より強力なモデルに変更
         self.session = session
         self.openai_service = EnhancedOpenAIService(model_name=model_name)
-    
-    def extract_past_questions_from_pdf(
+      def extract_past_questions_from_pdf(
         self,
         text: str,
         category: str = "過去問",
-        max_questions: int = 20,
+        max_questions: int = 15,
         progress_callback=None,
-        enable_duplicate_check: bool = True,
-        similarity_threshold: float = 0.7,
-        duplicate_action: str = "skip"
+        enable_duplicate_check: bool = False,  # 一時的に無効化
+        similarity_threshold: float = 0.5,     # より緩い閾値
+        duplicate_action: str = "save_with_warning"  # 重複でも保存
     ) -> List[int]:
         """PDFテキストから過去問を抽出（改善版）"""        
         if progress_callback:
@@ -127,8 +125,7 @@ class PastQuestionExtractor:
         print(f"\nSTATS: 抽出結果サマリー:")
         print(f"   OK: 成功: {successful_extractions}問")
         print(f"   ERROR: 失敗: {failed_extractions}問")
-        print(f"   SAVED: DB保存: {len(generated_question_ids)}問")
-        
+        print(f"   SAVED: DB保存: {len(generated_question_ids)}問")        
         if progress_callback:
             progress_callback(f"過去問抽出完了: {successful_extractions}問成功", 1.0)
         
@@ -138,16 +135,81 @@ class PastQuestionExtractor:
         """テキストを問題単位に分割（改善版）"""
         print(f"INFO: テキスト分割開始: 総文字数 {len(text)}")
         
-        # より多様な問題番号パターンを検索
+        # まず、より具体的な問題番号パターンで分割を試行
         patterns = [
             r'【問\s*(\d+)】',             # 【問1】 形式
             r'問題?\s*(\d+)[.．)\s]',      # 問題1. 問題１） など
             r'第\s*(\d+)\s*問[.．\s]',     # 第1問. など
             r'Q\s*(\d+)[.．)\s]',          # Q1. Q1) など
-            r'(\d+)[.．\s]',               # 1. など（より厳しく）
+            r'\n\s*(\d+)[.．]\s+',         # 改行+数字+ピリオド（より厳密）
         ]
         
         best_questions = []
+        best_pattern = None
+        
+        for pattern in patterns:
+            matches = list(re.finditer(pattern, text, re.IGNORECASE))
+            if len(matches) >= 2:  # 最低2問は必要
+                print(f"INFO: パターン '{pattern}' で {len(matches)}問を検出")
+                questions = []
+                
+                for i in range(len(matches)):
+                    start = matches[i].start()
+                    end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+                    question_chunk = text[start:end].strip()
+                    
+                    # チャンクサイズを制限（500-3000文字が理想）
+                    if 500 <= len(question_chunk) <= 3000:
+                        questions.append(question_chunk)
+                    elif len(question_chunk) > 3000:
+                        # 長すぎる場合は最初の2500文字のみ使用
+                        questions.append(question_chunk[:2500] + "...")
+                        print(f"WARN: 問題が長すぎるため切り詰めました: {len(question_chunk)}文字 → 2500文字")
+                
+                if len(questions) > len(best_questions):
+                    best_questions = questions
+                    best_pattern = pattern
+        
+        # パターンマッチに失敗した場合、段落分割を試行
+        if not best_questions:
+            print(f"WARN: 問題番号パターンが見つからないため、段落分割を使用")
+            paragraphs = re.split(r'\n\s*\n', text)
+            for p in paragraphs:
+                p = p.strip()
+                # より緩い条件で段落を問題として認識
+                if (len(p) > 300 and  # 最小文字数を増加
+                    any(marker in p for marker in ['?', '？', '①', '②', '③', 'A.', 'B.', 'C.']) and
+                    len(p) < 3000):  # 最大文字数制限
+                    best_questions.append(p)
+            
+            print(f"INFO: 段落分割で {len(best_questions)}問を検出")
+        
+        # 最終品質フィルタリング
+        filtered_questions = []
+        for i, q in enumerate(best_questions):
+            # 選択肢の存在確認（より厳密）
+            choice_patterns = ['①', '②', '③', '④', 'A.', 'B.', 'C.', 'D.', '1.', '2.', '3.', '4.']
+            choice_count = sum(1 for pattern in choice_patterns if pattern in q)
+            
+            has_sufficient_choices = choice_count >= 3  # 最低3つの選択肢
+            has_content = len(q.strip()) > 200  # 最低200文字
+            not_too_long = len(q) < 4000  # 最大4000文字
+            
+            if has_sufficient_choices and has_content and not_too_long:
+                filtered_questions.append(q)
+                print(f"OK: 問題{i+1}: 選択肢{choice_count}個, {len(q)}文字 - 品質基準クリア")
+            else:
+                print(f"SKIP: 問題{i+1}: 選択肢{choice_count}個, {len(q)}文字 - 品質基準不足")
+        
+        print(f"RESULT: 最終分割結果: {len(filtered_questions)}問 (パターン: {best_pattern})")
+        
+        # 最初の2問の詳細プレビュー
+        for i, q in enumerate(filtered_questions[:2]):
+            preview = q[:150].replace('\n', ' ')
+            print(f"   問題{i+1}: {len(q)}文字")
+            print(f"      プレビュー: {preview}...")
+        
+        return filtered_questions
         max_questions = 0
         best_pattern = None
         
@@ -249,15 +311,20 @@ class PastQuestionExtractor:
         if not has_choices:
             print("WARN: 選択肢が検出されないため、フォールバックを使用します")
             return self._fallback_extraction(question_text)
-        
-        # より短いプロンプト（トークン節約）
-        prompt = f"""以下のテキストから問題を抽出し、JSON形式で回答してください:
+          # シンプルで確実なプロンプト（1問のみ）
+        prompt = f"""以下のテキストから1つの完全な問題を抽出してください。
 
+テキスト:
 {question_text}
 
-次の形式で回答してください（JSONのみ）:
+必須条件:
+- 問題文、選択肢、正解、解説がすべて含まれている1問のみ
+- 不完全な問題や選択肢が不足している場合は空のオブジェクト{{}}を返す
+- 正解の選択肢には"is_correct": trueを設定
+
+JSON形式で回答（例）:
 {{
-    "title": "問題のタイトル",
+    "title": "問題タイトル",
     "question": "問題文",
     "choices": [
         {{"text": "選択肢1", "is_correct": false}},
@@ -265,8 +332,10 @@ class PastQuestionExtractor:
         {{"text": "選択肢3", "is_correct": false}},
         {{"text": "選択肢4", "is_correct": false}}
     ],
-    "explanation": "解説文"
-}}"""
+    "explanation": "解説"
+}}
+
+完全な問題が見つからない場合: {{}}"""
         
         try:
             print(f"INFO: OpenAI API呼び出し開始")

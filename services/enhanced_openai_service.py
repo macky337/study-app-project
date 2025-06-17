@@ -11,6 +11,7 @@ import json
 from typing import Optional, List, Dict
 from dataclasses import dataclass, asdict
 from dotenv import load_dotenv
+import backoff
 
 # Load environment variables
 load_dotenv()
@@ -483,6 +484,55 @@ class EnhancedOpenAIService:
         
         return None
 
+    @backoff.on_exception(
+        backoff.expo,
+        (openai.RateLimitError, openai.APIConnectionError, openai.APITimeoutError),
+        max_tries=5,
+        max_time=60
+    )
+    def call_openai_api_with_retry(self, prompt, max_tokens=1000, temperature=0.7, system_message=None):
+        """
+        リトライ機能付きのOpenAI API呼び出し
+        """
+        try:
+            # タイムアウト設定付きクライアント作成
+            client = OpenAI(
+                api_key=self.api_key,
+                timeout=30  # 30秒でタイムアウト
+            )
+            
+            messages = []
+            if system_message:
+                messages.append({"role": "system", "content": system_message})
+            messages.append({"role": "user", "content": prompt})
+            
+            print(f"INFO: OpenAI API呼び出し開始 (モデル: {self.model_name})")
+            start_time = time.time()
+            
+            response = client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+            
+            elapsed_time = time.time() - start_time
+            print(f"OK: API呼び出し成功 ({elapsed_time:.2f}秒)")
+            
+            return response.choices[0].message.content
+            
+        except openai.RateLimitError as e:
+            print(f"WARN: レート制限エラー、リトライします: {e}")
+            raise
+        except openai.APIConnectionError as e:
+            print(f"WARN: 接続エラー、リトライします: {e}")
+            raise
+        except openai.APITimeoutError as e:
+            print(f"WARN: タイムアウトエラー、リトライします: {e}")
+            raise
+        except Exception as e:
+            print(f"ERROR: 予期しないエラー: {e}")
+            raise
 
 def test_enhanced_openai_service():
     """Test the enhanced OpenAI service"""
