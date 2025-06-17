@@ -5,7 +5,7 @@ import os
 import logging
 
 # ロギング設定
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # ページ設定（最初に実行する必要がある）
 st.set_page_config(
