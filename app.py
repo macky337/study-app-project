@@ -2,6 +2,10 @@ import streamlit as st
 import time
 from datetime import datetime
 import os
+import logging
+
+# ロギング設定
+logging.basicConfig(level=logging.DEBUG)
 
 # ページ設定（最初に実行する必要がある）
 st.set_page_config(
@@ -1762,6 +1766,8 @@ elif page == "🔧 問題管理":
                                         st.markdown(f"**難易度:** {question.difficulty}")
                                         st.markdown(f"**問題文:** {question.content}")
                                         
+                                        # 選択肢を表示
+                                        choices = choice_service.get_choices_by_question(question.id)
                                         if choices:
                                             st.markdown("**選択肢:**")
                                             for choice_idx, choice in enumerate(choices):
@@ -1865,6 +1871,7 @@ elif page == "⚙️ 設定":
             st.session_state.session_id = generate_session_id()
             st.session_state.current_question = None
             st.session_state.show_result = False
+            st.session_state.user_answer = None
             st.success("新しいセッションを開始しました！")
             st.rerun()
     
@@ -2015,9 +2022,3 @@ elif page == "⚙️ 設定":
                             
             except Exception as e:
                 st.error(f"データベース状態確認エラー: {e}")
-    else:
-        st.error("⚠️ データベースに接続できません")
-
-# フッター
-st.markdown("---")
-st.markdown("**Study Quiz App** - powered by Streamlit & Railway 🚀")
