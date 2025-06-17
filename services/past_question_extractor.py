@@ -11,10 +11,12 @@ from services.enhanced_openai_service import EnhancedOpenAIService
 
 class PastQuestionExtractor:
     """過去問抽出クラス"""
-      def __init__(self, session, model_name="gpt-4o"):  # より強力なモデルに変更
+    
+    def __init__(self, session, model_name="gpt-4o"):  # より強力なモデルに変更
         self.session = session
         self.openai_service = EnhancedOpenAIService(model_name=model_name)
-      def extract_past_questions_from_pdf(
+    
+    def extract_past_questions_from_pdf(
         self,
         text: str,
         category: str = "過去問",
