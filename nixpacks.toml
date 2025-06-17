@@ -1,0 +1,13 @@
+# Nixpacks configuration for Python Streamlit app
+
+[[phases.install]]
+commands = [
+  "pip install --no-cache-dir -r requirements.txt"
+]
+
+[[phases.build]]
+commands = []
+
+[[services]]
+command = "streamlit run app.py --server.port $PORT --server.address 0.0.0.0"
+port = 8501
