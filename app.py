@@ -32,6 +32,66 @@ def get_difficulty_emoji(difficulty):
     emoji_map = {"easy": "🟢", "medium": "🟡", "hard": "🔴"}
     return emoji_map.get(difficulty, "🟡")
 
+def determine_question_type(question_content, choices):
+    """
+    問題内容と選択肢から問題タイプを判定する
+    Returns: 'single' (単一選択) or 'multiple' (複数選択)
+    """
+    # 問題文に複数選択を示すキーワードが含まれているかチェック
+    multiple_keywords = [
+        "すべて選", "全て選", "すべて選択", "全て選択",
+        "すべて", "全て", "複数選択", "あてはまるもの",
+        "該当するもの", "正しいもの", "間違っているもの",
+        "当てはまるもの", "あてはまるものを", "該当するものを",
+        "すべて答え", "全て答え", "すべて回答", "全て回答"
+    ]
+    
+    content_lower = question_content.lower()
+    
+    # 複数選択のキーワードが含まれているかチェック
+    for keyword in multiple_keywords:
+        if keyword in content_lower:
+            return 'multiple'
+    
+    # 正解の選択肢が複数あるかチェック
+    if choices:
+        correct_count = sum(1 for choice in choices if choice.is_correct)
+        if correct_count > 1:
+            return 'multiple'
+    
+    # デフォルトは単一選択
+    return 'single'
+
+def render_question_choices(question_content, choices, key_suffix=""):
+    """
+    問題タイプに応じて適切な選択肢コンポーネントを表示する
+    Returns: (selected_indices, question_type)
+    """
+    question_type = determine_question_type(question_content, choices)
+    choice_labels = [f"{chr(65+i)}. {choice.content}" for i, choice in enumerate(choices)]
+    
+    if question_type == 'multiple':
+        # 複数選択（チェックボックス）
+        st.markdown("**回答を選択してください（複数選択可能）:**")
+        selected_indices = []
+        
+        for i, label in enumerate(choice_labels):
+            if st.checkbox(label, key=f"checkbox_{i}_{key_suffix}"):
+                selected_indices.append(i)
+        
+        return selected_indices, question_type
+    else:
+        # 単一選択（ラジオボタン）
+        st.markdown("**回答を選択してください（一つだけ選択）:**")
+        selected_idx = st.radio(
+            "",
+            range(len(choices)),
+            format_func=lambda x: choice_labels[x] if x < len(choice_labels) else "エラー",
+            key=f"radio_{key_suffix}"
+        )
+        
+        return [selected_idx], question_type
+
 try:
     print("🔍 Initializing database connection...")
     from sqlmodel import Session
@@ -356,41 +416,38 @@ elif page == "🎲 クイズ":
             if not st.session_state.show_result:
                 # 回答フェーズ
                 st.markdown("---")
-                st.markdown("**選択肢を選んでください:**")
                 
-                # デバッグ情報表示（開発時のみ）
-                if len(choices) == 0:
-                    st.error("選択肢データが取得できません")
-                    st.stop()
-                
-                choice_labels = [f"{chr(65+i)}. {choice.content}" for i, choice in enumerate(choices)]
-                print(f"DEBUG: 選択肢ラベル: {choice_labels}")  # デバッグログ
-                
-                # 選択肢が空でないことを確認
-                if not choice_labels:
-                    st.error("選択肢の生成に失敗しました")
-                    st.stop()
-                
-                selected_idx = st.radio(
-                    "回答を選択:",
-                    range(len(choices)),
-                    format_func=lambda x: choice_labels[x] if x < len(choice_labels) else "エラー",
-                    key=f"quiz_choice_{st.session_state.quiz_choice_key}"
-                )
+                # 問題タイプに応じた選択肢コンポーネントの表示
+                selected_indices, question_type = render_question_choices(question.content, choices, key_suffix=str(st.session_state.quiz_choice_key))
                 
                 col1, col2 = st.columns([1, 1])
                 with col1:
                     if st.button("🔍 回答する", use_container_width=True):
+                        # 選択肢が選ばれているかチェック
+                        if not selected_indices:
+                            st.error("❌ 選択肢を選んでください。")
+                            st.stop()
+                        
                         # 回答時間を計算
                         answer_time = time.time() - st.session_state.start_time
                         
-                        selected_choice = choices[selected_idx]
-                        is_correct = selected_choice.is_correct
+                        # 選択肢のIDと正答判定
+                        if question_type == 'multiple':
+                            selected_choice_ids = [choices[i].id for i in selected_indices]
+                            # 複数選択の正答判定：選択した選択肢がすべて正解で、かつ正解の選択肢をすべて選択している
+                            selected_correct = all(choices[i].is_correct for i in selected_indices)
+                            all_correct_selected = all(i in selected_indices for i, choice in enumerate(choices) if choice.is_correct)
+                            is_correct = selected_correct and all_correct_selected and len(selected_indices) > 0
+                            record_choice_id = selected_choice_ids[0] if selected_choice_ids else None
+                        else:
+                            selected_choice_id = choices[selected_indices[0]].id
+                            is_correct = choices[selected_indices[0]].is_correct
+                            record_choice_id = selected_choice_id
                         
                         # 回答を記録
                         user_answer_service.record_answer(
                             question_id=question.id,
-                            selected_choice_id=selected_choice.id,
+                            selected_choice_id=record_choice_id,
                             is_correct=is_correct,
                             answer_time=answer_time,
                             session_id=st.session_state.session_id
@@ -399,11 +456,21 @@ elif page == "🎲 クイズ":
                         # 回答済み問題に追加
                         st.session_state.answered_questions.add(question.id)
                         
-                        st.session_state.user_answer = {
-                            'selected_choice': selected_choice,
-                            'is_correct': is_correct,
-                            'answer_time': answer_time
-                        }
+                        # セッション状態に回答情報を保存
+                        if question_type == 'multiple':
+                            st.session_state.user_answer = {
+                                'selected_choice': selected_choice_ids,
+                                'is_correct': is_correct,
+                                'answer_time': answer_time,
+                                'question_type': 'multiple'
+                            }
+                        else:
+                            st.session_state.user_answer = {
+                                'selected_choice': selected_choice_id,
+                                'is_correct': is_correct,
+                                'answer_time': answer_time,
+                                'question_type': 'single'
+                            }
                         st.session_state.show_result = True
                         st.rerun()
                 
@@ -419,14 +486,36 @@ elif page == "🎲 クイズ":
                 # 結果表示フェーズ
                 st.markdown("---")
                 user_answer = st.session_state.user_answer
+                question_type = user_answer.get('question_type', 'single')  # セッション状態から取得、なければsingle
                 
                 if user_answer['is_correct']:
                     st.success("🎉 正解です！")
                 else:
                     st.error("❌ 不正解です")
                     # 正解を表示
-                    correct_choice = next(c for c in choices if c.is_correct)
-                    st.info(f"**正解:** {correct_choice.content}")
+                    if question_type == 'multiple':
+                        correct_choices = [c for c in choices if c.is_correct]
+                        if correct_choices:
+                            st.info("**正解:**")
+                            for i, choice in enumerate(correct_choices):
+                                st.write(f"• {choice.content}")
+                    else:
+                        correct_choice = next((c for c in choices if c.is_correct), None)
+                        if correct_choice:
+                            st.info(f"**正解:** {correct_choice.content}")
+                
+                # ユーザーの選択を表示
+                if question_type == 'multiple':
+                    selected_contents = [choices[i].content for i in range(len(choices)) 
+                                       if choices[i].id in user_answer['selected_choice']]
+                    if selected_contents:
+                        st.write("**あなたの選択:**")
+                        for content in selected_contents:
+                            st.write(f"• {content}")
+                else:
+                    selected_choice = next((c for c in choices if c.id == user_answer['selected_choice']), None)
+                    if selected_choice:
+                        st.write(f"**あなたの選択:** {selected_choice.content}")
                 
                 # 解説表示
                 if question.explanation:
@@ -1141,7 +1230,6 @@ elif page == "🔧 問題管理":
                                 help="アップロードされたPDFの内容はOpenAIの学習データとして使用されません。処理完了後、内容はメモリから削除されます。",
                                 key="privacy_confirmation_gen"
                             )
-                        
                         else:  # 過去問抽出モード
                             st.markdown("**📝 過去問抽出設定**")
                             
@@ -1591,8 +1679,8 @@ elif page == "🔧 問題管理":
                                                     st.markdown(f"**解説:** {question.explanation}")
                                                 else:
                                                     st.info("解説は生成されませんでした")
-                                                
-                                                st.markdown("---")                                    # 問題一覧への移動ボタン
+                                            
+                                            st.markdown("---")                                    # 問題一覧への移動ボタン
                                     if st.button("📝 問題一覧で確認", type="secondary", use_container_width=True):
                                         st.info("問題一覧タブで生成された問題を確認できます")
                                 else:
