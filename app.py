@@ -747,7 +747,8 @@ elif page == "🔧 問題管理":
                             options=list(model_options.keys()),
                             format_func=lambda x: model_options[x],
                             index=0,  # デフォルトはgpt-3.5-turbo
-                            help="高品質なモデルほど高コストですが、より詳細で正確な問題を生成します"
+                            help="高品質なモデルほど高コストですが、より詳細で正確な問題を生成します",
+                            key="ai_model_selection"
                         )
                         
                         # モデル詳細情報
@@ -763,11 +764,13 @@ elif page == "🔧 問題管理":
                                f"コスト: {info['cost']} | 品質: {info['quality']} | 速度: {info['speed']}")
                         
                         # 他のオプション
-                        include_explanation = st.checkbox("解説を含める", value=True)
+                        include_explanation = st.checkbox("解説を含める", value=True, key="include_explanation_ai")
                         question_length = st.selectbox(
                             "問題文の長さ",
                             ["short", "medium", "long"],
-                            format_func=lambda x: {"short": "短い", "medium": "標準", "long": "詳細"}[x]                        )
+                            format_func=lambda x: {"short": "短い", "medium": "標準", "long": "詳細"}[x],
+                            key="question_length_selection"
+                        )
                         
                         st.markdown("---")
                         st.markdown("**🔍 重複チェック設定**")
@@ -775,7 +778,8 @@ elif page == "🔧 問題管理":
                         enable_duplicate_check = st.checkbox(
                             "重複問題チェックを有効にする",
                             value=True,
-                            help="既存の問題と類似する問題の生成を防ぎます"
+                            help="既存の問題と類似する問題の生成を防ぎます",
+                            key="enable_duplicate_check_ai"
                         )
                         
                         if enable_duplicate_check:
@@ -785,7 +789,8 @@ elif page == "🔧 問題管理":
                                 max_value=1.0,
                                 value=0.8,
                                 step=0.05,
-                                help="この値以上の類似度を持つ問題は重複として判定されます"
+                                help="この値以上の類似度を持つ問題は重複として判定されます",
+                                key="similarity_threshold_ai"
                             )
                             
                             max_retry_attempts = st.slider(
@@ -793,7 +798,8 @@ elif page == "🔧 問題管理":
                                 min_value=1,
                                 max_value=5,
                                 value=3,
-                                help="重複が検出された場合の最大再生成回数"
+                                help="重複が検出された場合の最大再生成回数",
+                                key="max_retry_attempts_ai"
                             )
                         else:
                             similarity_threshold = 0.8
