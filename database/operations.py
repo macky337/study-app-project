@@ -1,5 +1,6 @@
 from typing import List, Optional
 from sqlmodel import Session, select, func
+from datetime import datetime, timedelta
 from models import Question, Choice, UserAnswer
 
 
@@ -38,22 +39,73 @@ class QuestionService:
     
     def get_question_by_id(self, question_id: int) -> Optional[Question]:
         """IDで問題を取得"""
-        return self.session.get(Question, question_id)
+        question = self.session.get(Question, question_id)
+        if question:
+            # セッションから切り離される前に必要なデータをプリロード
+            _ = question.id
+            _ = question.title
+            _ = question.content
+            _ = question.category
+            _ = question.difficulty
+            _ = question.explanation
+            _ = question.created_at
+            _ = question.updated_at
+        return question
     
     def get_questions_by_category(self, category: str) -> List[Question]:
         """カテゴリで問題を取得"""
         statement = select(Question).where(Question.category == category)
-        return self.session.exec(statement).all()
+        results = self.session.exec(statement).all()
+        
+        # セッションから切り離される前に必要なデータをプリロード
+        for question in results:
+            _ = question.id
+            _ = question.title
+            _ = question.content
+            _ = question.category
+            _ = question.difficulty
+            _ = question.explanation
+            _ = question.created_at
+            _ = question.updated_at
+        
+        return results
     
     def get_random_questions(self, limit: int = 10) -> List[Question]:
         """ランダムに問題を取得"""
         statement = select(Question).order_by(func.random()).limit(limit)
-        return self.session.exec(statement).all()
+        results = self.session.exec(statement).all()
+        
+        # セッションから切り離される前に必要なデータをプリロード
+        for question in results:
+            # 全ての属性にアクセスして確実にロード
+            _ = question.id
+            _ = question.title
+            _ = question.content
+            _ = question.category
+            _ = question.difficulty
+            _ = question.explanation
+            _ = question.created_at
+            _ = question.updated_at
+        
+        return results
     
     def get_random_questions_by_category(self, category: str, limit: int = 10) -> List[Question]:
         """指定したカテゴリからランダムに問題を取得"""
         statement = select(Question).where(Question.category == category).order_by(func.random()).limit(limit)
-        return self.session.exec(statement).all()
+        results = self.session.exec(statement).all()
+        
+        # セッションから切り離される前に必要なデータをプリロード
+        for question in results:
+            _ = question.id
+            _ = question.title
+            _ = question.content
+            _ = question.category
+            _ = question.difficulty
+            _ = question.explanation
+            _ = question.created_at
+            _ = question.updated_at
+        
+        return results
     
     def get_all_categories(self) -> List[str]:
         """全ての問題のカテゴリを取得"""
@@ -632,6 +684,100 @@ class UserAnswerService:
         """指定した問題のユーザー回答を取得"""
         statement = select(UserAnswer).where(UserAnswer.question_id == question_id)
         return self.session.exec(statement).all()
+    
+    def get_category_stats(self, session_id: Optional[str] = None) -> dict:
+        """カテゴリ別の統計を取得"""
+        try:
+            from sqlmodel import func, text
+            
+            statement = (
+                select(
+                    Question.category,
+                    func.count(UserAnswer.id).label('total_answers'),
+                    func.sum(text("CASE WHEN useranswer.is_correct THEN 1 ELSE 0 END")).label('correct_answers')
+                )
+                .join(Question, UserAnswer.question_id == Question.id)
+            )
+            
+            if session_id:
+                statement = statement.where(UserAnswer.session_id == session_id)
+            
+            statement = statement.group_by(Question.category)
+            
+            results = self.session.exec(statement).all()
+            
+            category_stats = {}
+            for result in results:
+                category = result[0]
+                total = int(result[1]) if result[1] is not None else 0
+                correct = int(result[2]) if result[2] is not None else 0
+                accuracy = (correct / total * 100) if total > 0 else 0.0
+                
+                category_stats[category] = {
+                    "total": total,
+                    "correct": correct,
+                    "accuracy": round(accuracy, 2)
+                }
+            
+            return category_stats
+        except Exception as e:
+            print(f"カテゴリ別統計取得エラー: {e}")
+            # エラー時はセッションをロールバック
+            try:
+                self.session.rollback()
+            except:
+                pass
+            return {}
+    
+    def get_daily_stats(self, session_id: Optional[str] = None, days: int = 30) -> dict:
+        """日別の統計を取得"""
+        try:
+            from sqlmodel import func, text
+            from datetime import datetime, timedelta
+            
+            # 過去N日間の日付範囲を設定
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days)
+            
+            statement = (
+                select(
+                    func.date(UserAnswer.answered_at).label('date'),
+                    func.count(UserAnswer.id).label('total_answers'),
+                    func.sum(text("CASE WHEN useranswer.is_correct THEN 1 ELSE 0 END")).label('correct_answers')
+                )
+                .where(UserAnswer.answered_at >= start_date)
+                .where(UserAnswer.answered_at <= end_date)
+            )
+            
+            if session_id:
+                statement = statement.where(UserAnswer.session_id == session_id)
+            
+            statement = statement.group_by(func.date(UserAnswer.answered_at)).order_by(func.date(UserAnswer.answered_at))
+            
+            results = self.session.exec(statement).all()
+            
+            daily_stats = {}
+            for result in results:
+                date = str(result[0])
+                total = int(result[1]) if result[1] is not None else 0
+                correct = int(result[2]) if result[2] is not None else 0
+                accuracy = (correct / total * 100) if total > 0 else 0.0
+                
+                daily_stats[date] = {
+                    "total": total,
+                    "correct": correct,
+                    "accuracy": round(accuracy, 2)
+                }
+            
+            return daily_stats
+        except Exception as e:
+            print(f"日別統計取得エラー: {e}")
+            # エラー時はセッションをロールバック
+            try:
+                self.session.rollback()
+            except:
+                pass
+            return {}
     
     def delete_answer(self, answer_id: int) -> bool:
         """ユーザー回答を削除"""

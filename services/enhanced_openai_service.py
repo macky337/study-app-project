@@ -110,10 +110,19 @@ class EnhancedOpenAIService:
         difficulty: str = "medium",
         topic: Optional[str] = None,
         question_type: str = "multiple_choice",
-        language: str = "japanese"
+        language: str = "japanese",
+        allow_multiple_correct: bool = False
     ) -> Optional[GeneratedQuestion]:
         """
         Generate a question with enhanced options and error handling
+        
+        Args:
+            category: 問題カテゴリ
+            difficulty: 難易度
+            topic: 特定のトピック（オプション）
+            question_type: 問題タイプ
+            language: 言語
+            allow_multiple_correct: 複数の正解を許可するかどうか
         """
         
         prompt = self._create_enhanced_prompt(
@@ -121,7 +130,8 @@ class EnhancedOpenAIService:
             difficulty=difficulty,
             topic=topic,
             question_type=question_type,
-            language=language
+            language=language,
+            allow_multiple_correct=allow_multiple_correct
         )
         
         for attempt in range(self.max_retries):
@@ -210,7 +220,8 @@ class EnhancedOpenAIService:
         difficulty: str,
         topic: Optional[str],
         question_type: str,
-        language: str
+        language: str,
+        allow_multiple_correct: bool = False
     ) -> str:
         """Create an enhanced prompt with more specific instructions"""
         
@@ -222,6 +233,9 @@ class EnhancedOpenAIService:
         
         topic_instruction = f"特に「{topic}」に関連する内容で" if topic else ""
         
+        # 複数正解設定に基づいた指示
+        correct_answer_instruction = "3. 正解は複数ある場合もあります" if allow_multiple_correct else "3. 正解は必ず1つのみ"
+        
         prompt = f"""
 {category}の{difficulty_instructions[difficulty]}を作成してください。
 {topic_instruction}
@@ -231,7 +245,7 @@ class EnhancedOpenAIService:
 **条件:**
 1. 問題文は具体的で実践的な内容にする
 2. 選択肢は必ず4つ作成する（この条件は絶対に守ってください）
-3. 正解は必ず1つのみ
+{correct_answer_instruction}
 4. 間違いの選択肢も教育的価値があるものにする
 5. 解説は詳しく、なぜその答えが正しいかを説明する
 6. 難易度「{difficulty}」に適した問題レベルにする

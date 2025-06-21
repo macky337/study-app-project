@@ -22,10 +22,13 @@ class PDFQuestionGenerator:
         num_questions: int = 5,
         difficulty: str = "medium",
         category: str = "PDF教材",
+        model: str = "gpt-4o-mini",
+        include_explanation: bool = True,
         progress_callback=None,
         enable_duplicate_check: bool = True,
         similarity_threshold: float = 0.7,
-        max_retry_attempts: int = 3
+        max_retry_attempts: int = 3,
+        allow_multiple_correct: bool = False
     ) -> List[int]:
         """PDFテキストから問題を生成"""
         
@@ -57,8 +60,8 @@ class PDFQuestionGenerator:
             
             try:
                 chunk_questions = self._generate_questions_from_chunk(
-                    chunk, current_questions, difficulty, category,
-                    enable_duplicate_check, similarity_threshold, max_retry_attempts
+                    chunk, current_questions, difficulty, category, model, include_explanation,
+                    enable_duplicate_check, similarity_threshold, max_retry_attempts, allow_multiple_correct
                 )
                 generated_question_ids.extend(chunk_questions)
             except Exception as e:
@@ -99,37 +102,37 @@ class PDFQuestionGenerator:
         if current_chunk.strip():
             chunks.append(current_chunk.strip())
         
-        return [chunk for chunk in chunks if len(chunk.strip()) > 100]  # 短すぎるチャンクを除外
+        return [chunk for chunk in chunks if len(chunk.strip()) > 100]
     
     def _split_by_sections(self, text: str) -> List[str]:
-        """見出しや段落でテキストを分割"""
-        # 一般的な見出しパターンで分割
+        """セクションで分割"""
+        # 見出しパターンを検出
         section_patterns = [
-            r'\n\s*第?\d+[章節条項]\s*[^\n]*\n',  # 第1章、第1節など
-            r'\n\s*\d+\.\s*[^\n]*\n',           # 1. タイトル
-            r'\n\s*[A-Z][^\n]{10,50}\n',        # 大文字で始まる見出し
-            r'\n\s*[\u3042-\u3096\u30A1-\u30FA\u4e00-\u9faf]{5,30}\n'  # 日本語見出し
+            r'\n\s*[第\d]+[章節条項]\s*[^\n]*\n',  # 第1章、第1節など
+            r'\n\s*\d+\.\s*[^\n]*\n',  # 1. タイトル
+            r'\n\s*[A-Z]+\.\s*[^\n]*\n',  # A. タイトル
+            r'\n\s*【[^】]+】\s*\n',  # 【タイトル】
+            r'\n\s*■[^\n]*\n',  # ■タイトル
+            r'\n\s*#+\s*[^\n]*\n'  # Markdown見出し
         ]
         
-        # まず大きな段落で分割
-        paragraphs = re.split(r'\n\s*\n\s*\n', text)
+        # まず、見出しで分割を試行
+        for pattern in section_patterns:
+            matches = list(re.finditer(pattern, text))
+            if len(matches) > 1:
+                sections = []
+                last_end = 0
+                for match in matches:
+                    if last_end < match.start():
+                        sections.append(text[last_end:match.start()].strip())
+                    last_end = match.end()
+                if last_end < len(text):
+                    sections.append(text[last_end:].strip())
+                return [s for s in sections if len(s.strip()) > 50]
         
-        # 段落が長すぎる場合はさらに分割
-        sections = []
-        for paragraph in paragraphs:
-            if len(paragraph) > 1500:
-                # 見出しパターンで分割を試みる
-                for pattern in section_patterns:
-                    if re.search(pattern, paragraph):
-                        subsections = re.split(pattern, paragraph)
-                        sections.extend([s for s in subsections if len(s.strip()) > 50])
-                        break
-                else:
-                    sections.append(paragraph)
-            else:
-                sections.append(paragraph)
-        
-        return [s.strip() for s in sections if len(s.strip()) > 50]
+        # 見出しが見つからない場合は段落で分割
+        paragraphs = text.split('\n\n')
+        return [p.strip() for p in paragraphs if len(p.strip()) > 50]
     
     def _split_by_sentences(self, text: str) -> List[str]:
         """文で分割"""
@@ -137,15 +140,31 @@ class PDFQuestionGenerator:
         sentence_endings = r'[。！？\.\!\?]\s*'
         sentences = re.split(sentence_endings, text)
         return [s.strip() for s in sentences if len(s.strip()) > 10]
-    
+
     def _generate_questions_from_chunk(
         self,
         chunk: str,
         num_questions: int,
         difficulty: str,
-        category: str
+        category: str,
+        model: str = "gpt-4o-mini",
+        include_explanation: bool = True,
+        enable_duplicate_check: bool = True,
+        similarity_threshold: float = 0.7,
+        max_retry_attempts: int = 3,
+        allow_multiple_correct: bool = False
     ) -> List[int]:
         """チャンクから問題を生成"""
+        
+        # 指定されたモデルでOpenAIサービスを初期化
+        openai_service = EnhancedOpenAIService(model_name=model)
+        
+        # 解説を含めるかどうかでプロンプトを調整
+        explanation_instruction = "詳細な解説を含める" if include_explanation else "解説は不要"
+        explanation_field = '"explanation": "正解の理由と解説"' if include_explanation else '"explanation": ""'
+        
+        # 複数正解に関する指示を調整
+        multiple_correct_instruction = "問題によっては複数の正解が可能です" if allow_multiple_correct else "必ず1つの正解と3つの不正解を含む"
         
         prompt = f"""
 以下のテキストを基に、{num_questions}個の4択問題を作成してください。
@@ -157,9 +176,10 @@ class PDFQuestionGenerator:
 - 難易度: {difficulty}
 - カテゴリ: {category}
 - 各問題は4つの選択肢を持つ
-- 必ず1つの正解と3つの不正解を含む
+- {multiple_correct_instruction}
 - 実際のテキスト内容に基づいた問題を作成
 - 問題は理解度を測るものにする
+- {explanation_instruction}
 
 【出力形式】（JSON形式で回答）
 {{
@@ -173,7 +193,7 @@ class PDFQuestionGenerator:
                 {{"text": "選択肢C", "is_correct": false}},
                 {{"text": "選択肢D", "is_correct": false}}
             ],
-            "explanation": "正解の理由と解説"
+            {explanation_field}
         }}
     ]
 }}
@@ -182,144 +202,222 @@ JSONのみを出力し、他の文字は含めないでください。
 """
 
         try:
-            response = self.openai_service.generate_completion(
+            # OpenAI APIで問題生成
+            response = openai_service.generate_completion(
                 prompt=prompt,
                 max_tokens=2000,
                 temperature=0.7
             )
             
             # JSONパース
-            json_start = response.find('{')
-            json_end = response.rfind('}') + 1
-            if json_start != -1 and json_end != -1:
-                json_str = response[json_start:json_end]
-                questions_data = json.loads(json_str)
-            else:
-                raise ValueError("有効なJSONが見つかりません")
-              # データベースに保存
+            questions_data = json.loads(response)
+            
+            # 問題をDBに保存
             question_ids = []
             for q_data in questions_data.get('questions', []):
-                question_id = self._save_question_to_db(q_data, category, difficulty)
+                question_id = self._save_question_to_db(
+                    q_data, category, difficulty,
+                    enable_duplicate_check, True,  # enable_content_validation=True
+                    similarity_threshold, max_retry_attempts
+                )
                 if question_id:
                     question_ids.append(question_id)
             
             return question_ids
             
+        except json.JSONDecodeError as e:
+            print(f"JSON解析エラー: {e}")
+            return []
         except Exception as e:
             print(f"問題生成エラー: {e}")
             return []
-    
+
     def _save_question_to_db(
-        self, 
-        question_data: Dict, 
+        self,
+        question_data: Dict,
         category: str,
         difficulty: str,
-        enable_duplicate_check: bool = True,
-        enable_content_validation: bool = True,
-        similarity_threshold: float = 0.7,
-        max_retry_attempts: int = 3
+        enable_duplicate_check: bool,
+        enable_content_validation: bool,
+        similarity_threshold: float,
+        max_retry_attempts: int
     ) -> Optional[int]:
-        """生成された問題をデータベースに保存（内容検証機能付き）"""
+        """問題をデータベースに保存"""
+        
         try:
             from database.operations import QuestionService, ChoiceService
             
             question_service = QuestionService(self.session)
             choice_service = ChoiceService(self.session)
             
-            # 問題データの前処理
-            title = question_data.get('title', 'PDF生成問題')
-            content = question_data['content']
-            explanation = question_data.get('explanation', '')
-            choices_data = question_data.get('choices', [])
+            # 重複チェック
+            if enable_duplicate_check:
+                existing = question_service.find_similar_questions(
+                    question_data['content'], 
+                    threshold=similarity_threshold
+                )
+                if existing:
+                    print(f"類似問題が既に存在するためスキップ: {question_data.get('title', '無題')}")
+                    return None
             
-            # 内容検証（有効な場合）
-            if enable_content_validation:
-                # 一時的な問題と選択肢を作成して検証
-                temp_question = type('TempQuestion', (), {
-                    'title': title,
-                    'content': content,
-                    'category': category,
-                    'explanation': explanation,
-                    'difficulty': difficulty
-                })()
-                
-                temp_choices = []
-                for choice_data in choices_data:
-                    temp_choice = type('TempChoice', (), {
-                        'text': choice_data.get('content', choice_data.get('text', '')),
-                        'is_correct': choice_data.get('is_correct', False)
-                    })()
-                    temp_choices.append(temp_choice)
-                
-                try:
-                    validation_result = question_service.validate_question_and_choices(temp_question, temp_choices)
-                    
-                    # 重大なエラーがある場合はスキップ
-                    if not validation_result.get("valid", True):
-                        print(f"⚠️ PDF問題の内容検証失敗: {validation_result.get('errors', [])}")
-                        return None
-                    
-                    # 警告がある場合はログ出力
-                    if validation_result.get("warnings"):
-                        print(f"📋 PDF問題の内容検証警告: {validation_result['warnings']}")
-                        
-                except Exception as e:
-                    print(f"⚠️ PDF問題の内容検証でエラー: {e}")
-                    # 検証エラーの場合は継続
+            # 問題を保存
+            question_id = question_service.create_question(
+                title=question_data.get('title', '無題'),
+                content=question_data['content'],
+                category=category,
+                difficulty=difficulty,
+                explanation=question_data.get('explanation', '')
+            )
+            
+            if not question_id:
+                return None
+            
+            # 選択肢を保存
+            for order, choice in enumerate(question_data['choices']):
+                choice_service.create_choice(
+                    question_id=question_id,
+                    content=choice['text'],
+                    is_correct=choice['is_correct'],
+                    order_num=order + 1
+                )
+              return question_id
+            
+        except Exception as e:
+            print(f"DB保存エラー: {e}")
+            return None
+        enable_duplicate_check: bool = True,
+        similarity_threshold: float = 0.7,
+        max_retry_attempts: int = 3,
+        allow_multiple_correct: bool = False
+    ) -> List[int]:
+        """チャンクから問題を生成"""
+        
+        # 指定されたモデルでOpenAIサービスを初期化
+        openai_service = EnhancedOpenAIService(model_name=model)
+          # 解説を含めるかどうかでプロンプトを調整
+        explanation_instruction = "詳細な解説を含める" if include_explanation else "解説は不要"
+        explanation_field = '"explanation": "正解の理由と解説"' if include_explanation else '"explanation": ""'
+        
+        # 複数正解に関する指示を調整
+        multiple_correct_instruction = "問題によっては複数の正解が可能です" if allow_multiple_correct else "必ず1つの正解と3つの不正解を含む"
+        
+        prompt = f"""
+以下のテキストを基に、{num_questions}個の4択問題を作成してください。
+
+【テキスト内容】
+{chunk}
+
+【要求事項】
+- 難易度: {difficulty}
+- カテゴリ: {category}
+- 各問題は4つの選択肢を持つ
+- {multiple_correct_instruction}
+- 実際のテキスト内容に基づいた問題を作成
+- 問題は理解度を測るものにする
+- {explanation_instruction}
+
+【出力形式】（JSON形式で回答）
+{{
+    "questions": [
+        {{
+            "title": "問題のタイトル",
+            "content": "問題文",
+            "choices": [
+                {{"text": "選択肢A", "is_correct": false}},
+                {{"text": "選択肢B", "is_correct": true}},
+                {{"text": "選択肢C", "is_correct": false}},
+                {{"text": "選択肢D", "is_correct": false}}
+            ],
+            {explanation_field}
+        }}
+    ]
+}}
+
+JSONのみを出力し、他の文字は含めないでください。
+"""
+
+        try:
+            # OpenAI APIで問題生成
+            response = openai_service.generate_completion(
+                prompt=prompt,
+                max_tokens=2000,
+                temperature=0.7
+            )
+            
+            # JSONパース
+            questions_data = json.loads(response)
+            
+            # 問題をDBに保存
+            question_ids = []
+            for q_data in questions_data.get('questions', []):
+                question_id = self._save_question_to_db(
+                    q_data, category, difficulty,
+                    enable_duplicate_check, True,  # enable_content_validation=True
+                    similarity_threshold, max_retry_attempts
+                )
+                if question_id:
+                    question_ids.append(question_id)
+            
+            return question_ids
+            
+        except json.JSONDecodeError as e:
+            print(f"JSON解析エラー: {e}")
+            return []
+        except Exception as e:
+            print(f"問題生成エラー: {e}")
+            return []
+
+    def _save_question_to_db(
+        self,
+        question_data: Dict,
+        category: str,
+        difficulty: str,
+        enable_duplicate_check: bool,
+        enable_content_validation: bool,
+        similarity_threshold: float,
+        max_retry_attempts: int
+    ) -> Optional[int]:
+        """問題をデータベースに保存"""
+        
+        try:
+            from database.operations import QuestionService, ChoiceService
+            
+            question_service = QuestionService(self.session)
+            choice_service = ChoiceService(self.session)
             
             # 重複チェック
             if enable_duplicate_check:
-                # 重複チェック付きで問題を作成
-                if hasattr(question_service, 'create_question_with_duplicate_check'):
-                    creation_result = question_service.create_question_with_duplicate_check(
-                        title=title,
-                        content=content,
-                        category=category,
-                        explanation=explanation,
-                        difficulty=difficulty,
-                        force_create=False,  # 重複の場合は作成しない
-                        similarity_threshold=similarity_threshold                    )
-                    
-                    if not creation_result.get("success", False):
-                        print(f"INFO: 重複のためスキップ - {creation_result.get('message', 'Unknown reason')}")
-                        return None
-                    
-                    question = creation_result["question"]
-                else:
-                    # フォールバック: 通常の作成
-                    question = question_service.create_question(
-                        title=title,
-                        content=content,
-                        category=category,
-                        explanation=explanation,
-                        difficulty=difficulty
-                    )
-            else:
-                # 重複チェックなしで作成
-                question = question_service.create_question(
-                    title=title,
-                    content=content,
-                    category=category,
-                    explanation=explanation,
-                    difficulty=difficulty
+                existing = question_service.find_similar_questions(
+                    question_data['content'], 
+                    threshold=similarity_threshold
                 )
+                if existing:
+                    print(f"類似問題が既に存在するためスキップ: {question_data.get('title', '無題')}")
+                    return None
             
-            # 選択肢を作成
-            choices = question_data.get('choices', [])
-            for i, choice_data in enumerate(choices):
+            # 問題を保存
+            question_id = question_service.create_question(
+                title=question_data.get('title', '無題'),
+                content=question_data['content'],
+                category=category,
+                difficulty=difficulty,
+                explanation=question_data.get('explanation', '')
+            )
+            
+            if not question_id:
+                return None
+            
+            # 選択肢を保存
+            for order, choice in enumerate(question_data['choices']):
                 choice_service.create_choice(
-                    question_id=question.id,
-                    content=choice_data['text'],
-                    is_correct=choice_data['is_correct'],
-                    order_num=i + 1
+                    question_id=question_id,
+                    content=choice['text'],
+                    is_correct=choice['is_correct'],
+                    order_num=order + 1
                 )
             
-            return question.id
+            return question_id
             
         except Exception as e:
-            print(f"データベース保存エラー: {e}")
+            print(f"DB保存エラー: {e}")
             return None
-    
-    def validate_openai_connection(self) -> Dict[str, any]:
-        """OpenAI接続確認"""
-        return self.openai_service.test_connection()
