@@ -89,6 +89,31 @@ class QuestionService:
         
         return results
     
+    def get_all_questions(self) -> List[Question]:
+        """すべての問題を取得"""
+        statement = select(Question)
+        results = self.session.exec(statement).all()
+        
+        # セッションから切り離される前に必要なデータをプリロード
+        for question in results:
+            # 全ての属性にアクセスして確実にロード
+            _ = question.id
+            _ = question.title
+            _ = question.content
+            _ = question.category
+            _ = question.difficulty
+            _ = question.explanation
+            _ = question.created_at
+            _ = question.updated_at
+        
+        return results
+    
+    def get_question_count(self) -> int:
+        """問題の総数を取得（効率的）"""
+        statement = select(func.count(Question.id))
+        result = self.session.exec(statement).one()
+        return result
+    
     def get_random_questions_by_category(self, category: str, limit: int = 10) -> List[Question]:
         """指定したカテゴリからランダムに問題を取得"""
         statement = select(Question).where(Question.category == category).order_by(func.random()).limit(limit)
@@ -286,30 +311,47 @@ class QuestionService:
     def delete_question(self, question_id: int) -> bool:
         """問題を削除（関連する選択肢・回答も削除）"""
         try:
+            print(f"🔍 削除開始: 問題ID {question_id}")
+            
             # 問題を取得
             question = self.session.get(Question, question_id)
             if not question:
+                print(f"❌ 問題が見つかりません: ID {question_id}")
                 return False
             
+            print(f"✅ 問題を発見: {question.title}")
+            
             # 関連する選択肢を削除
+            print("🔄 関連選択肢を削除中...")
             choice_service = ChoiceService(self.session)
-            choices = choice_service.get_choices_by_question(question_id)
+            choices = choice_service.get_choices_by_question_id(question_id)
+            deleted_choices = 0
             for choice in choices:
-                choice_service.delete_choice(choice.id)
+                if choice_service.delete_choice(choice.id):
+                    deleted_choices += 1
+            print(f"✅ {deleted_choices}個の選択肢を削除")
             
             # 関連するユーザー回答を削除
+            print("🔄 関連回答履歴を削除中...")
             user_answer_service = UserAnswerService(self.session)
             user_answers = user_answer_service.get_answers_by_question(question_id)
+            deleted_answers = 0
             for answer in user_answers:
-                user_answer_service.delete_answer(answer.id)
+                if user_answer_service.delete_answer(answer.id):
+                    deleted_answers += 1
+            print(f"✅ {deleted_answers}個の回答履歴を削除")
             
             # 問題を削除
+            print("🔄 問題本体を削除中...")
             self.session.delete(question)
             self.session.commit()
+            print(f"✅ 問題ID {question_id} の削除完了")
             return True
             
         except Exception as e:
-            print(f"問題削除エラー: {e}")
+            print(f"❌ 問題削除エラー: {e}")
+            import traceback
+            print(f"📝 詳細エラー: {traceback.format_exc()}")
             self.session.rollback()
             return False
     

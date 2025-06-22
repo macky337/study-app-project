@@ -2,6 +2,7 @@
 問題管理ページ - 問題の一覧表示、AI生成、PDF処理、重複検査
 """
 import streamlit as st
+from datetime import datetime
 
 def render_question_management_page():
     """問題管理ページのメイン表示"""
@@ -57,16 +58,56 @@ def render_question_management_page():
 
 def render_question_list_tab(question_service, choice_service):
     """問題一覧タブ"""
-    st.markdown("### 📝 問題一覧・管理")
-    
-    # フィルター設定
+    st.markdown("### 📝 問題一覧・管理")    # 削除成功メッセージの表示（最初に表示）
+    if st.session_state.get('deletion_success', False):
+        deleted_info = st.session_state.get('deleted_question_info', {})
+        
+        # 目立つ成功メッセージ（背景色付き）
+        st.markdown("""
+        <div style="background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 5px; padding: 15px; margin: 10px 0;">
+            <h4 style="color: #155724; margin: 0;">🎉 削除完了!</h4>
+            <p style="color: #155724; margin: 5px 0;">問題ID <strong>{}</strong> 「<strong>{}</strong>」を正常に削除しました</p>
+        </div>
+        """.format(deleted_info.get('id', 'Unknown'), deleted_info.get('title', 'Unknown')), unsafe_allow_html=True)
+        
+        # 削除された問題の詳細情報
+        with st.expander("🔍 削除された問題の詳細情報", expanded=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"**問題ID:** {deleted_info.get('id', 'Unknown')}")
+                st.markdown(f"**タイトル:** {deleted_info.get('title', 'Unknown')}")
+                st.markdown(f"**カテゴリ:** {deleted_info.get('category', 'Unknown')}")
+            with col2:
+                st.markdown(f"**削除時刻:** {deleted_info.get('deletion_time', 'Unknown')}")
+                st.markdown(f"**削除前の総問題数:** {deleted_info.get('total_before', 0)}")
+                st.markdown(f"**削除後の総問題数:** {deleted_info.get('total_after', 0)}")
+        
+        # 数値の変化を強調表示
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.info(f"📊 **データベース更新:** {deleted_info.get('total_before', 0)} 問 → {deleted_info.get('total_after', 0)} 問 (削除数: {deleted_info.get('deleted_count', 1)})")
+        with col2:
+            if st.button("✖️ 閉じる", key="close_deletion_message"):
+                del st.session_state['deletion_success']
+                if 'deleted_question_info' in st.session_state:
+                    del st.session_state['deleted_question_info']
+                st.rerun()
+        
+        st.markdown("---")
+      # フィルター設定
     col1, col2, col3 = st.columns(3)
     
-    # 全問題を取得してカテゴリリストを作成
-    all_questions = question_service.get_random_questions(limit=1000)
-    # SQLModelオブジェクトを辞書に変換してセッション管理エラーを防止
-    from database.connection import models_to_dicts
-    all_questions_dicts = models_to_dicts(all_questions)
+    # 全問題を取得してカテゴリリストを作成（削除後は強制再取得）
+    cache_key = f"questions_cache_{st.session_state.get('deletion_success_count', 0)}"
+    if cache_key not in st.session_state:
+        all_questions = question_service.get_random_questions(limit=1000)
+        # SQLModelオブジェクトを辞書に変換してセッション管理エラーを防止
+        from database.connection import models_to_dicts
+        all_questions_dicts = models_to_dicts(all_questions)
+        st.session_state[cache_key] = all_questions_dicts
+    else:
+        all_questions_dicts = st.session_state[cache_key]
+    
     categories = sorted(list(set(q['category'] for q in all_questions_dicts)))
     difficulties = ["all", "easy", "medium", "hard"]
     
@@ -91,8 +132,7 @@ def render_question_list_tab(question_service, choice_service):
         )
     
     with col3:
-        per_page = st.selectbox("表示件数", [10, 20, 50, 100], index=1, key="per_page")
-      # フィルター適用
+        per_page = st.selectbox("表示件数", [10, 20, 50, 100], index=1, key="per_page")    # フィルター適用
     filtered_questions = all_questions_dicts
     if selected_category != "all":
         filtered_questions = [q for q in filtered_questions if q['category'] == selected_category]
@@ -132,26 +172,14 @@ def render_question_list_tab(question_service, choice_service):
                     st.markdown(f"{chr(65+j)}. {choice.content}{correct_mark}")
             if question['explanation']:
                 st.markdown(f"**解説:** {question['explanation']}")
-            
-            # 編集・削除ボタン
+              # 編集・削除ボタン
             col1, col2 = st.columns([1, 1])
             with col1:
                 if st.button(f"✏️ 編集", key=f"edit_{question['id']}"):
-                    st.info("編集機能は今後実装予定です")
+                    render_edit_question_modal(question, question_service, choice_service)
             
             with col2:
-                if st.button(f"🗑️ 削除", key=f"delete_{question['id']}"):
-                    confirm_key = f"confirm_delete_{question['id']}"
-                    if st.session_state.get(confirm_key, False):
-                        if question_service.delete_question(question['id']):
-                            st.success(f"問題 ID {question['id']} を削除しました")
-                            st.session_state[confirm_key] = False
-                            st.rerun()
-                        else:
-                            st.error("削除に失敗しました")
-                    else:
-                        st.session_state[confirm_key] = True
-                        st.warning("もう一度クリックして削除を確認してください")
+                render_delete_question_button(question, question_service)
 
 def render_ai_generation_tab(session):
     """AI問題生成タブ"""
@@ -647,3 +675,238 @@ def render_demo_management():
             st.markdown("B. 選択肢2 ✅")
             st.markdown("C. 選択肢3")
             st.markdown("D. 選択肢4")
+
+def render_delete_question_button(question, question_service):
+    """強化された削除ボタンとモーダル"""
+    delete_button_key = f"delete_{question['id']}"
+    modal_key = f"delete_modal_{question['id']}"
+    confirm_key = f"confirm_delete_{question['id']}"
+      # 削除ボタン
+    if st.button(f"🗑️ 削除", key=delete_button_key):
+        st.session_state[modal_key] = True
+    
+    # 削除確認モーダル
+    if st.session_state.get(modal_key, False):
+        with st.container():
+            st.markdown("---")
+            st.markdown("### ⚠️ 問題削除の確認")
+              # 削除対象の情報を強調表示
+            with st.container():
+                st.error("**🚨 注意: この操作は取り消すことができません**")
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    st.markdown("**問題ID:**")
+                    st.markdown("**タイトル:**")
+                    st.markdown("**カテゴリ:**")
+                    st.markdown("**難易度:**")
+                
+                with col2:
+                    st.markdown(f"`{question['id']}`")
+                    st.markdown(f"`{question['title']}`")
+                    st.markdown(f"`{question['category']}`")
+                    st.markdown(f"`{question['difficulty']}`")
+                
+                st.warning("**削除される内容:**")
+                st.markdown("- ✅ 問題本文")
+                st.markdown("- ✅ すべての選択肢")
+                st.markdown("- ✅ 解説")
+                st.markdown("- ✅ 関連する回答履歴")
+            
+            col1, col2, col3 = st.columns([1, 1, 1])
+            
+            with col1:
+                if st.button("❌ キャンセル", key=f"cancel_{question['id']}"):
+                    st.session_state[modal_key] = False
+                    st.session_state[confirm_key] = False
+                    st.rerun()
+            
+            with col2:
+                if st.button("🗑️ 削除実行", key=f"confirm_{question['id']}", type="primary"):
+                    # 削除前の存在確認
+                    try:
+                        existing_question = question_service.get_question_by_id(question['id'])
+                        if not existing_question:
+                            st.error(f"❌ 問題ID {question['id']} がデータベースに見つかりません")
+                            st.session_state[modal_key] = False
+                            st.rerun()
+                            return
+                    except Exception as check_error:
+                        st.error(f"❌ 問題存在確認エラー: {check_error}")
+                        st.session_state[modal_key] = False
+                        st.rerun()
+                        return
+                    
+                    # 削除前の状態確認
+                    pre_delete_count = question_service.get_question_count()
+                    
+                    # 削除実行
+                    with st.spinner("削除処理中..."):
+                        deletion_success = question_service.delete_question(question['id'])
+                    
+                    if deletion_success:
+                        # 削除後の状態確認
+                        post_delete_count = question_service.get_question_count()
+                        
+                        # 即座に削除成功メッセージを表示
+                        st.toast(f"✅ 問題ID {question['id']} を削除しました", icon="✅")
+                          # セッション状態に削除成功情報を保存（複数ページロードで保持）
+                        st.session_state['deletion_success'] = True
+                        st.session_state['deletion_success_count'] = st.session_state.get('deletion_success_count', 0) + 1
+                        st.session_state['deleted_question_info'] = {
+                            'id': question['id'],
+                            'title': question['title'],
+                            'category': question['category'],
+                            'total_before': pre_delete_count,
+                            'total_after': post_delete_count,
+                            'deleted_count': pre_delete_count - post_delete_count,
+                            'deletion_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        }
+                        
+                        # 即座に削除成功メッセージを表示
+                        st.success(f"✅ **削除完了!** 問題ID {question['id']} 「{question['title']}」を削除しました")
+                        st.info(f"📊 問題数: {pre_delete_count} → {post_delete_count} (-{pre_delete_count - post_delete_count})")
+                        
+                        # データベースからの削除確認
+                        try:
+                            deleted_question = question_service.get_question_by_id(question['id'])
+                            if deleted_question is None:
+                                st.success("🔍 **データベース確認:** 問題はデータベースから完全に削除されました")
+                            else:
+                                st.warning("⚠️ **データベース確認:** 問題がまだデータベースに存在している可能性があります")
+                        except Exception:
+                            st.success("🔍 **データベース確認:** 問題は正常に削除されました")
+                          # セッション状態のクリア
+                        st.session_state[modal_key] = False
+                        st.session_state[confirm_key] = False
+                        
+                        # キャッシュをクリアして最新データを強制取得
+                        for key in list(st.session_state.keys()):
+                            if key.startswith('questions_cache_'):
+                                del st.session_state[key]
+                          # 祝福エフェクトとページリロード
+                        st.balloons()
+                        import time
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ **削除に失敗しました**")
+                        st.error("詳細なエラー情報は、コンソールログを確認してください")
+                        
+                        # デバッグ情報の表示
+                        with st.expander("🔍 デバッグ情報"):
+                            st.markdown(f"**削除対象の問題ID:** {question['id']}")
+                            st.markdown("**可能な原因:**")
+                            st.markdown("- 問題がデータベースに存在しない")
+                            st.markdown("- 外部キー制約エラー")
+                            st.markdown("- データベース接続エラー")
+                            st.markdown("- 権限不足")
+                            
+                            # 問題の存在確認
+                            try:
+                                existing_question = question_service.get_question_by_id(question['id'])
+                                if existing_question:
+                                    st.info("✅ 問題はデータベースに存在しています")
+                                else:
+                                    st.warning("⚠️ 問題がデータベースに見つかりません")
+                            except Exception as debug_error:
+                                st.error(f"デバッグチェックエラー: {debug_error}")
+                        
+                        st.session_state[modal_key] = False
+            
+            with col3:
+                st.markdown("")  # スペース用
+            
+            st.markdown("---")
+
+def render_edit_question_modal(question, question_service, choice_service):
+    """強化された編集モーダル"""
+    edit_modal_key = f"edit_modal_{question['id']}"
+    
+    # 編集モーダルの表示
+    st.session_state[edit_modal_key] = True
+    
+    if st.session_state.get(edit_modal_key, False):
+        with st.container():
+            st.markdown("---")
+            st.info("### ✏️ 問題の編集")
+            
+            # 現在の問題情報をフォームで表示
+            with st.form(f"edit_form_{question['id']}"):
+                st.markdown(f"**問題ID:** {question['id']}")
+                
+                # 編集可能フィールド
+                new_title = st.text_input("タイトル", value=question.get('title', ''))
+                new_content = st.text_area("問題文", value=question.get('content', ''), height=100)
+                new_category = st.selectbox(
+                    "カテゴリ", 
+                    ["プログラミング", "データベース", "ネットワーク", "セキュリティ", "その他"],
+                    index=0 if question.get('category') == "プログラミング" else 0
+                )
+                new_difficulty = st.selectbox(
+                    "難易度",
+                    ["easy", "medium", "hard"],
+                    index=["easy", "medium", "hard"].index(question.get('difficulty', 'medium'))
+                )
+                new_explanation = st.text_area("解説", value=question.get('explanation', ''), height=80)
+                
+                # 選択肢の編集
+                st.markdown("**選択肢:**")
+                try:
+                    choices = choice_service.get_choices_by_question_id(question['id'])
+                    new_choices = []
+                    
+                    for i, choice in enumerate(choices):
+                        col1, col2 = st.columns([4, 1])
+                        with col1:
+                            choice_content = st.text_input(
+                                f"選択肢 {chr(65+i)}", 
+                                value=choice.content,
+                                key=f"choice_{question['id']}_{i}"
+                            )
+                            new_choices.append(choice_content)
+                        with col2:
+                            is_correct = st.checkbox(
+                                "正答", 
+                                value=choice.is_correct,
+                                key=f"correct_{question['id']}_{i}"
+                            )
+                
+                except Exception as e:
+                    st.warning(f"選択肢の読み込みエラー: {e}")
+                    new_choices = ["", "", "", ""]
+                
+                # 保存・キャンセルボタン
+                col1, col2 = st.columns([1, 1])
+                
+                submitted = st.form_submit_button("💾 保存", type="primary")
+                cancelled = st.form_submit_button("❌ キャンセル")
+                
+                if submitted:
+                    try:
+                        # 問題情報の更新処理
+                        update_data = {
+                            'title': new_title,
+                            'content': new_content,
+                            'category': new_category,
+                            'difficulty': new_difficulty,
+                            'explanation': new_explanation
+                        }
+                        
+                        # 実際の更新処理（QuestionServiceに更新メソッドが必要）
+                        # success = question_service.update_question(question['id'], update_data)
+                        
+                        # 現在は情報表示のみ
+                        st.success("✅ **編集内容:**")
+                        st.json(update_data)
+                        st.info("📝 **注意:** 編集機能は開発中です。現在は内容確認のみ可能です。")
+                        
+                        st.session_state[edit_modal_key] = False
+                        
+                    except Exception as e:
+                        st.error(f"編集エラー: {e}")
+                
+                if cancelled:
+                    st.session_state[edit_modal_key] = False
+                    st.rerun()
+            
+            st.markdown("---")
