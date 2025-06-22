@@ -100,16 +100,19 @@ def display_question_result(user_answer, question, choices: List[Any]):
     問題の結果を表示
     
     Args:
-        user_answer: ユーザーの回答データ
-        question: 問題データ
+        user_answer: ユーザーの回答データ（dictまたはオブジェクト）
+        question: 問題データ（dictまたはオブジェクト）
         choices: 選択肢のリスト
     """
+    def get_attr(obj, key, default=None):
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default) if hasattr(obj, key) else default
+
     if not user_answer:
         st.error("回答データが見つかりません")
-        return
-    
-    # 結果のヘッダー
-    is_correct = getattr(user_answer, 'is_correct', False)
+        return    # 結果のヘッダー
+    is_correct = get_attr(user_answer, 'is_correct', False)
     
     if is_correct:
         st.success("🎉 正解です！")
@@ -117,26 +120,30 @@ def display_question_result(user_answer, question, choices: List[Any]):
         st.error("❌ 不正解です")
     
     # 回答時間の表示
-    if hasattr(user_answer, 'response_time_seconds'):
-        response_time = user_answer.response_time_seconds
-        if response_time:
-            st.info(f"⏱️ 回答時間: {response_time:.1f}秒")
+    response_time = get_attr(user_answer, 'answer_time', None) or get_attr(user_answer, 'response_time_seconds', None)
+    if response_time:
+        st.info(f"⏱️ 回答時間: {response_time:.1f}秒")
     
     # 選択肢の詳細表示
-    st.markdown("### 📋 回答詳細")
-    
-    # ユーザーの選択した選択肢
+    st.markdown("### 📋 回答詳細")    # ユーザーの選択した選択肢
     user_choices = []
-    if hasattr(user_answer, 'selected_choice_ids') and user_answer.selected_choice_ids:
-        user_choice_ids = user_answer.selected_choice_ids
-        if isinstance(user_choice_ids, str):
-            # 文字列形式の場合（例: "1,3,5"）
-            try:
-                user_choice_ids = [int(x.strip()) for x in user_choice_ids.split(',') if x.strip()]
-            except ValueError:
-                user_choice_ids = []
-        user_choices = [choice for choice in choices if choice.id in user_choice_ids]
+    selected_choice = get_attr(user_answer, 'selected_choice', None)
+    selected_choices = get_attr(user_answer, 'selected_choice', None) or get_attr(user_answer, 'selected_choice_ids', None)
     
+    if selected_choices is None:
+        selected_choices = []
+    if isinstance(selected_choices, int):
+        selected_choices = [selected_choices]
+    if isinstance(selected_choices, str):
+        try:
+            selected_choices = [int(x.strip()) for x in selected_choices.split(',') if x.strip()]
+        except Exception:
+            selected_choices = []
+    if selected_choice and not selected_choices:
+        selected_choices = [selected_choice]
+    
+    user_choices = [choice for choice in choices if getattr(choice, 'id', None) in selected_choices]
+
     # 各選択肢の表示
     for i, choice in enumerate(choices):
         choice_text = getattr(choice, 'content', f"選択肢 {i+1}")
@@ -169,13 +176,15 @@ def display_question_result(user_answer, question, choices: List[Any]):
             st.write(f"{icon} {prefix}{choice_text}")
     
     # 解説の表示
-    if hasattr(question, 'explanation') and question.explanation:
+    explanation = get_attr(question, 'explanation', None)
+    if explanation:
         st.markdown("### 💡 解説")
-        st.markdown(question.explanation)
+        st.markdown(explanation)
     
-    # 正解率の表示（データベースから取得可能な場合）
-    if hasattr(question, 'correct_rate') and question.correct_rate is not None:
-        st.markdown(f"### 📊 この問題の正解率: {question.correct_rate:.1f}%")
+    # 正解率の表示
+    correct_rate = get_attr(question, 'correct_rate', None)
+    if correct_rate is not None:
+        st.markdown(f"### 📊 この問題の正解率: {correct_rate:.1f}%")
 
 def display_demo_question():
     """デモモード用の問題表示"""

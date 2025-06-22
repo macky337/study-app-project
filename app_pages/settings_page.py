@@ -68,7 +68,7 @@ def render_session_management():
             # セッション状態をリセット
             st.session_state.session_id = generate_session_id()
             
-            # クイズ関連の状態をリセット
+            # 学習関連の状態をリセット
             reset_keys = [
                 'current_question', 'show_result', 'user_answer',
                 'answered_questions', 'quiz_choice_key', 'start_time'
@@ -328,7 +328,7 @@ def create_sample_data():
                     created_count += 1
             
             st.success(f"✅ {created_count}問のサンプルデータを作成しました！")
-            st.info("🎲 クイズページでテストしてみてください。")
+            st.info("🎲 学習ページでテストしてみてください。")
             
     except Exception as e:
         st.error(f"❌ サンプルデータ作成に失敗しました: {e}")

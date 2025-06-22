@@ -1,5 +1,5 @@
 """
-クイズ機能のページ
+学習機能のページ
 """
 import streamlit as st
 import time
@@ -7,13 +7,13 @@ from config.app_config import DATABASE_AVAILABLE
 from components.question_components import render_question_choices, display_question_header, display_question_result
 
 def quiz_page():
-    """クイズページのメイン関数"""
+    """学習ページのメイン関数"""
     # リアルタイムでデータベース接続をチェック
     from config.app_config import check_database_connection
     db_available, db_error = check_database_connection()
     
     if not db_available:
-        st.warning("⚠️ データベースに接続できません。デモモードでクイズを表示しています。")
+        st.warning("⚠️ データベースに接続できません。デモモードで学習を表示しています。")
         from components.question_components import display_demo_question
         display_demo_question()
         return
@@ -45,16 +45,19 @@ def quiz_page():
             display_current_question(question_service, choice_service, user_answer_service)
 
 def display_quiz_stats(question_service, user_answer_service):
-    """クイズ統計情報を表示"""
+    """学習統計情報を表示"""
     st.subheader("📚 学習支援ツール")
+    
+    
     st.markdown("""
     このアプリは効率的な学習をサポートする機能を提供します：
-    - 🎯 様々なカテゴリのクイズに挑戦
+    - 🎯 様々なカテゴリの学習に挑戦
     - 📊 学習進捗の追跡
     - 📑 PDFからの問題自動生成
     - 🤖 AIによる問題自動生成
     """)
     
+
     try:
         # 問題数を取得
         total_questions = len(question_service.get_random_questions(limit=1000))
@@ -76,8 +79,8 @@ def display_quiz_stats(question_service, user_answer_service):
         st.error(f"データベース接続エラー: {e}")
 
 def display_quiz_controls(question_service):
-    """クイズコントロールを表示"""
-    st.markdown("### 🚀 クイズを開始")
+    """学習コントロールを表示"""
+    st.markdown("### 🚀 学習を開始")
     st.markdown("カテゴリを選択して問題に挑戦！")
     
     # カテゴリ選択
@@ -91,7 +94,7 @@ def display_quiz_controls(question_service):
     selected_category = st.selectbox("カテゴリ", category_options)
     st.session_state.selected_category = selected_category
     
-    if st.button("🎲 クイズモードへ", use_container_width=True):
+    if st.button("🎲 学習モードへ", use_container_width=True):
         st.session_state.current_question = None
         st.session_state.show_result = False
         st.rerun()

@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 # アプリケーションのページリスト
 PAGES = [
     "🏠 ホーム",
-    "🎲 クイズ",
+    "🎲 学習",
     "📊 統計", 
     "🔧 問題管理",
     "⚙️ 設定"
