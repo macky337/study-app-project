@@ -3,9 +3,13 @@
 Gitコミット履歴からバージョン情報を自動生成
 """
 import subprocess
+import os
 import re
 from datetime import datetime
 from typing import Tuple, Optional
+
+# プロジェクトルートを設定 (config/git_version.py の親フォルダ)
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 def get_git_commit_info() -> Tuple[str, str, str]:
     """
@@ -15,27 +19,24 @@ def get_git_commit_info() -> Tuple[str, str, str]:
         Tuple[version, last_updated, commit_hash]
     """
     try:
-        # 最新のコミット情報を取得
-        result = subprocess.run([
-            'git', 'log', '-1', '--pretty=format:%H|%s|%cd', '--date=short'
-        ], capture_output=True, text=True, timeout=5, encoding='utf-8', errors='ignore')
+        # コミットハッシュ取得
+        res_hash = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            capture_output=True, text=True, timeout=5, cwd=PROJECT_ROOT
+        )
+        commit_hash = res_hash.stdout.strip() if res_hash.returncode == 0 else 'unknown'
         
-        if result.returncode != 0:
-            return get_fallback_version()
-        
-        parts = result.stdout.strip().split('|')
-        if len(parts) >= 3:
-            commit_hash, message, date = parts[0], parts[1], parts[2]
-        else:
-            return get_fallback_version()
+        # 最新コミット日付取得
+        res_date = subprocess.run(
+            ['git', 'log', '-1', '--format=%cd', '--date=short'],
+            capture_output=True, text=True, timeout=5, cwd=PROJECT_ROOT
+        )
+        date = res_date.stdout.strip() if res_date.returncode == 0 else datetime.now().strftime('%Y-%m-%d')
         
         # バージョン番号を決定
         version = determine_version_from_commits()
-        
-        return version, date, commit_hash[:8]
-        
+        return version, date, commit_hash
     except Exception as e:
-        print(f"Git情報取得エラー: {e}")
         return get_fallback_version()
 
 def determine_version_from_commits() -> str:
@@ -49,9 +50,10 @@ def determine_version_from_commits() -> str:
     """
     try:
         # 全コミット履歴を取得
-        result = subprocess.run([
-            'git', 'log', '--oneline', '--pretty=format:%s'
-        ], capture_output=True, text=True, timeout=10, encoding='utf-8', errors='ignore')
+        result = subprocess.run(
+            ['git', 'log', '--oneline', '--pretty=format:%s'],
+            capture_output=True, text=True, timeout=10, encoding='utf-8', errors='ignore', cwd=PROJECT_ROOT
+        )
         
         if result.returncode != 0:
             return "1.0.0"
@@ -98,9 +100,10 @@ def get_commit_count() -> int:
     総コミット数を取得
     """
     try:
-        result = subprocess.run([
-            'git', 'rev-list', '--count', 'HEAD'
-        ], capture_output=True, text=True, timeout=5, encoding='utf-8', errors='ignore')
+        result = subprocess.run(
+            ['git', 'rev-list', '--count', 'HEAD'],
+            capture_output=True, text=True, timeout=5, encoding='utf-8', errors='ignore', cwd=PROJECT_ROOT
+        )
         
         if result.returncode == 0:
             return int(result.stdout.strip())
@@ -116,27 +119,30 @@ def get_repository_info() -> dict:
     """
     try:
         # ブランチ名取得
-        branch_result = subprocess.run([
-            'git', 'branch', '--show-current'
-        ], capture_output=True, text=True, timeout=5, encoding='utf-8', errors='ignore')
+        branch_result = subprocess.run(
+            ['git', 'branch', '--show-current'],
+            capture_output=True, text=True, timeout=5, encoding='utf-8', errors='ignore', cwd=PROJECT_ROOT
+        )
         
         current_branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "unknown"
         
         # リモートURL取得
-        remote_result = subprocess.run([
-            'git', 'remote', 'get-url', 'origin'
-        ], capture_output=True, text=True, timeout=5, encoding='utf-8', errors='ignore')
+        remote_result = subprocess.run(
+            ['git', 'remote', 'get-url', 'origin'],
+            capture_output=True, text=True, timeout=5, encoding='utf-8', errors='ignore', cwd=PROJECT_ROOT
+        )
         
         remote_url = remote_result.stdout.strip() if remote_result.returncode == 0 else "unknown"
+        
+        commit_count = get_commit_count()
         
         return {
             "branch": current_branch,
             "remote_url": remote_url,
-            "commit_count": get_commit_count()
+            "commit_count": commit_count
         }
         
     except Exception as e:
-        print(f"リポジトリ情報取得エラー: {e}")
         return {
             "branch": "unknown",
             "remote_url": "unknown", 

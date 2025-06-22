@@ -12,38 +12,23 @@ APP_NAME = "Study Quiz App"
 
 def get_app_info():
     """アプリケーション情報を取得（Git情報から自動生成）"""
-    try:
-        from config.git_version import get_git_commit_info, get_repository_info
-        
-        # Git情報を取得
-        version, last_updated, commit_hash = get_git_commit_info()
-        repo_info = get_repository_info()
-        
-        # 現在日時を日本時間で取得
-        now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
-        return {
-            "version": version,
-            "last_updated": last_updated,
-            "app_name": APP_NAME,
-            "current_date": now_jst.strftime("%Y-%m-%d %H:%M"),
-            "commit_hash": commit_hash,
-            "branch": repo_info.get("branch", "unknown"),
-            "commit_count": repo_info.get("commit_count", 0)
-        }
-    except Exception as e:
-        # Git情報取得に失敗した場合のフォールバック
-        print(f"Git情報取得エラー: {e}")
-        # フォールバック時も日本時間で表示
-        now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
-        return {
-            "version": "1.0.0",
-            "last_updated": now_jst.strftime("%Y-%m-%d"),
-            "app_name": APP_NAME,
-            "current_date": now_jst.strftime("%Y-%m-%d %H:%M"),
-            "commit_hash": "unknown",
-            "branch": "unknown",
-            "commit_count": 0
-        }
+    # Git情報を取得
+    from config.git_version import get_git_commit_info, get_repository_info
+    
+    version, last_updated, commit_hash = get_git_commit_info()
+    repo_info = get_repository_info()
+    
+    # 現在日時を日本時間で取得
+    now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
+    return {
+        "version": version,
+        "last_updated": last_updated,
+        "app_name": APP_NAME,
+        "current_date": now_jst.strftime("%Y-%m-%d %H:%M"),
+        "commit_hash": commit_hash,
+        "branch": repo_info.get("branch", "unknown"),
+        "commit_count": repo_info.get("commit_count", 0)
+    }
 
 def get_database_status():
     """データベース接続状況を取得"""
