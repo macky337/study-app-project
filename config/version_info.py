@@ -6,6 +6,7 @@ from datetime import datetime
 from database.connection import engine
 from contextlib import contextmanager
 import streamlit as st
+from zoneinfo import ZoneInfo
 
 APP_NAME = "Study Quiz App"
 
@@ -18,11 +19,13 @@ def get_app_info():
         version, last_updated, commit_hash = get_git_commit_info()
         repo_info = get_repository_info()
         
+        # 現在日時を日本時間で取得
+        now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
         return {
             "version": version,
             "last_updated": last_updated,
             "app_name": APP_NAME,
-            "current_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "current_date": now_jst.strftime("%Y-%m-%d %H:%M"),
             "commit_hash": commit_hash,
             "branch": repo_info.get("branch", "unknown"),
             "commit_count": repo_info.get("commit_count", 0)
@@ -30,11 +33,13 @@ def get_app_info():
     except Exception as e:
         # Git情報取得に失敗した場合のフォールバック
         print(f"Git情報取得エラー: {e}")
+        # フォールバック時も日本時間で表示
+        now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
         return {
             "version": "1.0.0",
-            "last_updated": datetime.now().strftime("%Y-%m-%d"),
+            "last_updated": now_jst.strftime("%Y-%m-%d"),
             "app_name": APP_NAME,
-            "current_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "current_date": now_jst.strftime("%Y-%m-%d %H:%M"),
             "commit_hash": "unknown",
             "branch": "unknown",
             "commit_count": 0
