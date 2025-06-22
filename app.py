@@ -12,6 +12,7 @@ logging.basicConfig(level=logging.WARNING, format='%(levelname)s - %(message)s')
 # 設定とページのインポート
 try:
     from config.app_config import initialize_database, initialize_session_state, PAGES, configure_page
+    from config.version_info import render_system_info
     from app_pages.quiz_page import quiz_page
     from app_pages.statistics_page import render_statistics_page
     from app_pages.question_management_page import render_question_management_page
@@ -49,28 +50,12 @@ with st.sidebar:
         "ページを選択",
         PAGES,
         index=default_index,
-        key="current_page"
-    )
+        key="current_page"    )
     
     st.markdown("---")
     
-    # データベース状態表示
-    st.markdown("### 🔌 システム状態")
-    
-    # リアルタイムでデータベース接続をチェック
-    from config.app_config import check_database_connection
-    db_available, db_error = check_database_connection()
-    
-    if db_available:
-        st.success("✅ データベース接続中")
-    else:
-        st.warning("⚠️ データベース未接続（デモモード）")
-        if st.checkbox("🔍 エラー詳細を表示", key="show_db_error"):
-            st.error(f"エラー: {db_error}")
-    
-    # セッション情報表示
-    if hasattr(st.session_state, 'session_id'):
-        st.markdown(f"**セッション:** `{st.session_state.session_id[-8:]}`")
+    # システム情報をサイドバー下部に表示
+    render_system_info()
 
 def render_home_page():
     """ホームページの表示"""
