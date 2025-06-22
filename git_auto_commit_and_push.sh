@@ -1,5 +1,6 @@
 #!/bin/bash
 # 変更内容から自動コミットメッセージを生成し、develop/main両方にpushし、developに戻る
+# 使い方：ターミナルで./git_auto_commit_and_push.shを実行
 
 set -e
 
