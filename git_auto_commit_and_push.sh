@@ -10,6 +10,10 @@ if git diff --quiet && git diff --cached --quiet; then
   exit 0
 fi
 
+# バージョン情報を更新
+echo "バージョン情報を更新中..."
+./update_version.sh
+
 # 変更ファイル一覧取得
 CHANGED_FILES=$(git status --short)
 
