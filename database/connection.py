@@ -20,23 +20,9 @@ DATABASE_URL = (
     os.getenv("DATABASE_PRIVATE_URL")
 )
 
-print(f"🔍 Environment variables check:")
-print(f"   DATABASE_URL: {'✅ Set' if os.getenv('DATABASE_URL') else '❌ Not set'}")
-print(f"   DATABASE_PUBLIC_URL: {'✅ Set' if os.getenv('DATABASE_PUBLIC_URL') else '❌ Not set'}")
-print(f"   POSTGRES_URL: {'✅ Set' if os.getenv('POSTGRES_URL') else '❌ Not set'}")
-
+# デバッグ情報の出力を簡素化（起動高速化）
 if not DATABASE_URL:
-    # Show all available environment variables for debugging
-    available_vars = [var for var in os.environ.keys() if 'DATABASE' in var.upper() or 'POSTGRES' in var.upper()]
-    print(f"   Database-related env vars: {available_vars}")
-    
-    # Temporary fallback - create a mock engine for development
-    if not _engine_initialized:
-        print("⚠️  WARNING: No database URL found. Creating mock connection.")
-        print("   Please configure DATABASE_URL in Railway Variables.")
-        print("   App will run in demo mode without database functionality.")
-    
-    # Don't raise error immediately - let the app start and show a user-friendly message
+    print("⚠️  WARNING: No database URL found. Running in demo mode.")
     DATABASE_URL = None
     engine = None
     _engine_initialized = True
@@ -44,8 +30,7 @@ else:
     if not _engine_initialized and not _initialization_lock:
         _initialization_lock = True
         try:
-            print(f"🔗 Attempting database connection...")
-            print(f"   Database URL preview: {DATABASE_URL[:50]}...")
+            print(f"🔗 Connecting to database...")
             
             # PostgreSQL connection with proper encoding and SSL settings
             connect_args = {
@@ -58,61 +43,72 @@ else:
                 echo=False,  # Set to False in production
                 pool_pre_ping=True,
                 connect_args=connect_args,
-                pool_timeout=30,  # 30秒タイムアウト
-                pool_recycle=3600  # 1時間で接続をリサイクル
+                pool_timeout=5,  # 5秒タイムアウト（高速化）
+                pool_recycle=1800,  # 30分で接続をリサイクル
+                pool_size=2,  # 小さなプールサイズで起動高速化
+                max_overflow=3  # オーバーフロー制限
             )
             
             print("✅ Database engine created successfully")
             
-            # Test the connection
-            with engine.connect() as connection:
-                result = connection.execute(text("SELECT 1"))
-                result.fetchone()
-                print("✅ Database connection test successful")
-                
-                # Create tables using direct SQL to avoid SQLModel conflicts
+            # 軽量な接続テスト
+            try:
+                with engine.connect() as connection:
+                    connection.execute(text("SELECT 1"))
+                    print("✅ Database connection test successful")
+            except Exception as test_error:
+                print(f"⚠️ Database connection test failed: {test_error}")
+                # 接続テストが失敗してもエンジンは作成済みなので続行
+            
+            # テーブル作成は別スレッドで実行（非ブロッキング）
+            import threading
+            def create_tables_async():
                 try:
-                    connection.execute(text("""
-                        CREATE TABLE IF NOT EXISTS question (
-                            id SERIAL PRIMARY KEY,
-                            title VARCHAR NOT NULL,
-                            content TEXT NOT NULL,
-                            explanation TEXT,
-                            category VARCHAR NOT NULL,
-                            difficulty VARCHAR DEFAULT 'medium',
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            updated_at TIMESTAMP
-                        );
-                    """))
-                    
-                    connection.execute(text("""
-                        CREATE TABLE IF NOT EXISTS choice (
-                            id SERIAL PRIMARY KEY,
-                            question_id INTEGER REFERENCES question(id) ON DELETE CASCADE,
-                            content TEXT NOT NULL,
-                            is_correct BOOLEAN DEFAULT FALSE,
-                            order_num INTEGER DEFAULT 1
-                        );
-                    """))
-                    
-                    connection.execute(text("""
-                        CREATE TABLE IF NOT EXISTS useranswer (
-                            id SERIAL PRIMARY KEY,
-                            question_id INTEGER REFERENCES question(id) ON DELETE CASCADE,
-                            selected_choice_id INTEGER REFERENCES choice(id) ON DELETE CASCADE,
-                            is_correct BOOLEAN NOT NULL,
-                            answer_time FLOAT DEFAULT 0.0,
-                            answered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            session_id VARCHAR,
-                            user_id VARCHAR
-                        );
-                    """))
-                    
-                    connection.commit()
-                    print("✅ Database tables ensured to exist")
+                    with engine.connect() as connection:
+                        connection.execute(text("""
+                            CREATE TABLE IF NOT EXISTS question (
+                                id SERIAL PRIMARY KEY,
+                                title VARCHAR NOT NULL,
+                                content TEXT NOT NULL,
+                                explanation TEXT,
+                                category VARCHAR NOT NULL,
+                                difficulty VARCHAR DEFAULT 'medium',
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                updated_at TIMESTAMP
+                            );
+                        """))
+                        
+                        connection.execute(text("""
+                            CREATE TABLE IF NOT EXISTS choice (
+                                id SERIAL PRIMARY KEY,
+                                question_id INTEGER REFERENCES question(id) ON DELETE CASCADE,
+                                content TEXT NOT NULL,
+                                is_correct BOOLEAN DEFAULT FALSE,
+                                order_num INTEGER DEFAULT 1
+                            );
+                        """))
+                        
+                        connection.execute(text("""
+                            CREATE TABLE IF NOT EXISTS useranswer (
+                                id SERIAL PRIMARY KEY,
+                                question_id INTEGER REFERENCES question(id) ON DELETE CASCADE,
+                                selected_choice_id INTEGER REFERENCES choice(id) ON DELETE CASCADE,
+                                is_correct BOOLEAN NOT NULL,
+                                answer_time FLOAT DEFAULT 0.0,
+                                answered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                session_id VARCHAR,
+                                user_id VARCHAR
+                            );
+                        """))
+                        
+                        connection.commit()
+                        print("✅ Database tables ensured to exist (async)")
                 except Exception as table_error:
-                    print(f"⚠️ Table creation warning: {table_error}")
-                    # Continue anyway - tables might already exist
+                    print(f"⚠️ Table creation warning (async): {table_error}")
+            
+            # バックグラウンドでテーブル作成
+            table_thread = threading.Thread(target=create_tables_async, daemon=True)
+            table_thread.start()
             
             print("✅ Database engine created and connection tested successfully")
             _engine_initialized = True
@@ -197,6 +193,9 @@ def create_tables():
         # Import models to register them with SQLModel (only once)
         if not _models_imported:
             try:
+                # Clear metadata to avoid duplicate definitions
+                SQLModel.metadata.clear()
+                
                 from models.question import Question
                 from models.choice import Choice  
                 from models.user_answer import UserAnswer

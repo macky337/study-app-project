@@ -35,3 +35,4 @@ diagnose_*.py
 improvement_*.py
 cleanup_*.py
 delete_*.py
+venv/

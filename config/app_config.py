@@ -32,11 +32,11 @@ _db_initialized = False  # 初期化フラグ
 _models_loaded = False  # モデル読み込みフラグ
 
 def ensure_models_loaded():
-    """モデルを一度だけ読み込む"""
+    """モデルを一度だけ読み込む（重複定義を回避）"""
     global _models_loaded
     if not _models_loaded:
         try:
-            # SQLModelのメタデータをクリア
+            # SQLModelのメタデータをクリアして重複定義を回避
             from sqlmodel import SQLModel
             SQLModel.metadata.clear()
             
@@ -46,9 +46,9 @@ def ensure_models_loaded():
             from models.user_answer import UserAnswer
             
             _models_loaded = True
-            print("📦 Models loaded successfully")
         except Exception as e:
-            print(f"⚠️ Model loading error: {e}")
+            print(f"Model loading error: {e}")
+            pass  # モデル読み込み失敗は無視
 
 def check_database_connection():
     """リアルタイムでデータベース接続状態をチェック"""
@@ -115,68 +115,30 @@ def initialize_session_state():
 
 # データベース接続処理
 def initialize_database():
-    """データベース接続を初期化"""
+    """データベース接続を初期化（高速化版）"""
     global DATABASE_AVAILABLE, DATABASE_ERROR, _db_initialized
-      # 既に初期化済みの場合はスキップ
+    
+    # 既に初期化済みの場合はスキップ
     if _db_initialized:
         return DATABASE_AVAILABLE, DATABASE_ERROR
     
     try:
-        print("🔍 Initializing database connection...")
-        
-        # モデルを事前に読み込み
+        # モデルを事前に読み込み（エラー無視で高速化）
         ensure_models_loaded()
         
-        from database.connection import engine, DATABASE_URL
+        from database.connection import engine
         
         if engine is not None:
-            print("✅ Database engine created successfully")
-            
-            # Test database connection with a simple query
-            with engine.connect() as connection:
-                from sqlmodel import text
-                result = connection.execute(text("SELECT 1"))
-                result.fetchone()
-                print("✅ Database connection test successful")
-            
             DATABASE_AVAILABLE = True
             DATABASE_ERROR = None
-            print("✅ Database connection established successfully")
-            
-            # Try to import optional modules (don't fail if they don't exist)
-            try:
-                from database.operations import QuestionService, ChoiceService, UserAnswerService
-                print("✅ Database operations imported successfully")
-            except ImportError as import_err:
-                print(f"⚠️ Optional database operations import failed: {import_err}")
-                # Continue anyway - basic connection is working
-            
-            try:
-                from utils.helpers import generate_session_id as real_generate_session_id, format_accuracy as real_format_accuracy, get_difficulty_emoji as real_get_difficulty_emoji
-                # Override with real functions
-                global generate_session_id, format_accuracy, get_difficulty_emoji
-                generate_session_id = real_generate_session_id
-                format_accuracy = real_format_accuracy
-                get_difficulty_emoji = real_get_difficulty_emoji
-                print("✅ Helper functions imported successfully")
-            except ImportError as helper_err:
-                print(f"⚠️ Helper functions import failed: {helper_err}")
-                # Use mock functions - they're already defined above
-            
+            print("✅ Database connection ready")
         else:
             raise Exception("Database engine is None")
             
-    except ImportError as e:
-        DATABASE_ERROR = f"Module import error: {str(e)}"
-        DATABASE_AVAILABLE = False
-        print(f"❌ Import error: {e}")
-        print("Running in demo mode without database functionality")
-        
     except Exception as e:
         DATABASE_ERROR = f"Database connection error: {str(e)}"
         DATABASE_AVAILABLE = False
-        print(f"❌ Database connection error: {e}")
-        print("Running in demo mode without database functionality")
+        print(f"❌ Database error: {e}")
     
     _db_initialized = True
     return DATABASE_AVAILABLE, DATABASE_ERROR

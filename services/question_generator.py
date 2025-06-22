@@ -399,7 +399,7 @@ class EnhancedQuestionGenerator:
             return fallback_patterns["基本情報技術者"]
 
 
-# Backward compatibility - create an alias
+# Backward compatibility alias
 QuestionGenerator = EnhancedQuestionGenerator
 
 

@@ -6,16 +6,16 @@ Study Quiz App - メインアプリケーション
 import streamlit as st
 import logging
 
-# ロギング設定
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+# ロギング設定（最小限に変更）
+logging.basicConfig(level=logging.WARNING, format='%(levelname)s - %(message)s')
 
 # 設定とページのインポート
 try:
     from config.app_config import initialize_database, initialize_session_state, PAGES, configure_page
-    from pages.quiz_page import quiz_page
-    from pages.statistics_page import render_statistics_page
-    from pages.question_management_page import render_question_management_page
-    from pages.settings_page import render_settings_page
+    from app_pages.quiz_page import quiz_page
+    from app_pages.statistics_page import render_statistics_page
+    from app_pages.question_management_page import render_question_management_page
+    from app_pages.settings_page import render_settings_page
     
     # ページ設定（最初に実行する必要がある）
     configure_page()
@@ -40,27 +40,17 @@ st.title("🎯 Study Quiz App")
 # サイドバーでページ選択
 with st.sidebar:
     st.title("📚 メニュー")
-      # ページ選択（デフォルトインデックスを管理）
+    # ページ選択（デフォルトインデックスを管理）
     if 'current_page' not in st.session_state:
-        st.session_state.current_page = "🏠 ホーム"
-    
-    try:
-        default_index = PAGES.index(st.session_state.current_page)
-    except ValueError:
-        default_index = 0
         st.session_state.current_page = PAGES[0]
-    
+    default_index = PAGES.index(st.session_state.current_page)
+    # selectboxのkeyをcurrent_pageにして自動更新
     selected_page = st.selectbox(
         "ページを選択",
         PAGES,
         index=default_index,
-        key="page_selector"
+        key="current_page"
     )
-    
-    # ページが変更された場合、セッション状態を更新
-    if selected_page != st.session_state.current_page:
-        st.session_state.current_page = selected_page
-        st.rerun()
     
     st.markdown("---")
     
@@ -101,11 +91,14 @@ def render_home_page():
         - 🔄 間違えた問題の復習
         - 🤖 AI による問題自動生成
         - 📄 PDFからの問題抽出
-        """)
-          # データベース統計を表示
+        """)          # データベース統計を表示
         db_available, db_error = check_database_connection()
         if db_available:
             try:
+                # モデルを安全に読み込み
+                from config.app_config import ensure_models_loaded
+                ensure_models_loaded()
+                
                 from database.operations import QuestionService, UserAnswerService
                 from database.connection import get_session_context
                 
