@@ -1,5 +1,5 @@
 from typing import List, Optional
-from sqlmodel import Session, select, func
+from sqlmodel import Session, select, func, delete
 from datetime import datetime, timedelta
 from models import Question, Choice, UserAnswer
 
@@ -309,7 +309,7 @@ class QuestionService:
             return {"error": f"AI検証エラー: {e}"}
     
     def delete_question(self, question_id: int) -> bool:
-        """問題を削除（関連する選択肢・回答も削除）"""
+        """問題を削除（関連する選択肢・回答も削除）- 改良版"""
         try:
             print(f"🔍 削除開始: 問題ID {question_id}")
             
@@ -321,32 +321,36 @@ class QuestionService:
             
             print(f"✅ 問題を発見: {question.title}")
             
-            # 関連する選択肢を削除
-            print("🔄 関連選択肢を削除中...")
-            choice_service = ChoiceService(self.session)
-            choices = choice_service.get_choices_by_question_id(question_id)
-            deleted_choices = 0
-            for choice in choices:
-                if choice_service.delete_choice(choice.id):
-                    deleted_choices += 1
-            print(f"✅ {deleted_choices}個の選択肢を削除")
-            
-            # 関連するユーザー回答を削除
+            # 最初にユーザー回答を削除（外部キー制約のため）
             print("🔄 関連回答履歴を削除中...")
-            user_answer_service = UserAnswerService(self.session)
-            user_answers = user_answer_service.get_answers_by_question(question_id)
-            deleted_answers = 0
-            for answer in user_answers:
-                if user_answer_service.delete_answer(answer.id):
-                    deleted_answers += 1
+            answer_delete_stmt = delete(UserAnswer).where(UserAnswer.question_id == question_id)
+            answer_result = self.session.exec(answer_delete_stmt)
+            deleted_answers = answer_result.rowcount if hasattr(answer_result, 'rowcount') else 0
             print(f"✅ {deleted_answers}個の回答履歴を削除")
+            
+            # 次に選択肢を削除
+            print("🔄 関連選択肢を削除中...")
+            choice_delete_stmt = delete(Choice).where(Choice.question_id == question_id)
+            choice_result = self.session.exec(choice_delete_stmt)
+            deleted_choices = choice_result.rowcount if hasattr(choice_result, 'rowcount') else 0
+            print(f"✅ {deleted_choices}個の選択肢を削除")
             
             # 問題を削除
             print("🔄 問題本体を削除中...")
             self.session.delete(question)
+            
+            # コミット
             self.session.commit()
             print(f"✅ 問題ID {question_id} の削除完了")
-            return True
+            
+            # 削除確認
+            verification = self.session.get(Question, question_id)
+            if verification is None:
+                print(f"🔍 削除確認: 問題ID {question_id} は正常に削除されました")
+                return True
+            else:
+                print(f"⚠️ 削除確認: 問題ID {question_id} がまだ存在しています")
+                return False
             
         except Exception as e:
             print(f"❌ 問題削除エラー: {e}")

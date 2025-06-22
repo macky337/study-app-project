@@ -738,10 +738,26 @@ def render_delete_question_button(question, question_service):
                     
                     # 削除前の状態確認
                     pre_delete_count = question_service.get_question_count()
-                    
-                    # 削除実行
+                      # 削除実行（改良版）
                     with st.spinner("削除処理中..."):
-                        deletion_success = question_service.delete_question(question['id'])
+                        try:
+                            # トランザクション的に削除を実行
+                            deletion_success = question_service.delete_question(question['id'])
+                            
+                            # 削除結果の検証
+                            if deletion_success:
+                                # 削除確認：問題が実際に削除されたかチェック
+                                verification_check = question_service.get_question_by_id(question['id'])
+                                if verification_check is None:
+                                    # 削除成功
+                                    deletion_success = True
+                                else:
+                                    # 削除失敗（まだ存在している）
+                                    deletion_success = False
+                            
+                        except Exception as delete_error:
+                            st.error(f"削除処理中にエラーが発生しました: {delete_error}")
+                            deletion_success = False
                     
                     if deletion_success:
                         # 削除後の状態確認
@@ -775,41 +791,46 @@ def render_delete_question_button(question, question_service):
                                 st.warning("⚠️ **データベース確認:** 問題がまだデータベースに存在している可能性があります")
                         except Exception:
                             st.success("🔍 **データベース確認:** 問題は正常に削除されました")
-                          # セッション状態のクリア
-                        st.session_state[modal_key] = False
+                          # セッション状態のクリア                        st.session_state[modal_key] = False
                         st.session_state[confirm_key] = False
                         
                         # キャッシュをクリアして最新データを強制取得
                         for key in list(st.session_state.keys()):
-                            if key.startswith('questions_cache_'):
+                            if key.startswith('questions_cache_') or key.startswith('delete_modal_'):
                                 del st.session_state[key]
-                          # 祝福エフェクトとページリロード
-                        st.balloons()
+                        
+                        # 削除成功の即座表示（rerunの前に）
+                        st.success("🎉 削除が完了しました！ページを更新します...")
+                        
+                        # 祝福エフェクト
+                        # st.balloons()
+                        
+                        # 短い待機後にページリロード
                         import time
-                        time.sleep(1)
+                        time.sleep(0.5)  # 短縮
                         st.rerun()
                     else:
                         st.error("❌ **削除に失敗しました**")
                         st.error("詳細なエラー情報は、コンソールログを確認してください")
+                          # デバッグ情報の表示（expanderを避けてコンテナで表示）
+                        st.markdown("---")
+                        st.markdown("🔍 **デバッグ情報:**")
+                        st.markdown(f"**削除対象の問題ID:** {question['id']}")
+                        st.markdown("**可能な原因:**")
+                        st.markdown("- 問題がデータベースに存在しない")
+                        st.markdown("- 外部キー制約エラー")
+                        st.markdown("- データベース接続エラー")
+                        st.markdown("- 権限不足")
                         
-                        # デバッグ情報の表示
-                        with st.expander("🔍 デバッグ情報"):
-                            st.markdown(f"**削除対象の問題ID:** {question['id']}")
-                            st.markdown("**可能な原因:**")
-                            st.markdown("- 問題がデータベースに存在しない")
-                            st.markdown("- 外部キー制約エラー")
-                            st.markdown("- データベース接続エラー")
-                            st.markdown("- 権限不足")
-                            
-                            # 問題の存在確認
-                            try:
-                                existing_question = question_service.get_question_by_id(question['id'])
-                                if existing_question:
-                                    st.info("✅ 問題はデータベースに存在しています")
-                                else:
-                                    st.warning("⚠️ 問題がデータベースに見つかりません")
-                            except Exception as debug_error:
-                                st.error(f"デバッグチェックエラー: {debug_error}")
+                        # 問題の存在確認
+                        try:
+                            existing_question = question_service.get_question_by_id(question['id'])
+                            if existing_question:
+                                st.info("✅ 問題はデータベースに存在しています")
+                            else:
+                                st.warning("⚠️ 問題がデータベースに見つかりません")
+                        except Exception as debug_error:
+                            st.error(f"デバッグチェックエラー: {debug_error}")
                         
                         st.session_state[modal_key] = False
             
