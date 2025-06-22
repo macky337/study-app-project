@@ -18,7 +18,20 @@ def get_git_commit_info() -> Tuple[str, str, str]:
     Returns:
         Tuple[version, last_updated, commit_hash]
     """
+    # 本番環境チェック（.gitフォルダが存在しない、またはgitコマンドが使用できない場合）
+    git_dir = os.path.join(PROJECT_ROOT, '.git')
+    if not os.path.exists(git_dir):
+        return get_production_fallback_version()
+    
     try:
+        # Gitコマンドの存在確認
+        git_check = subprocess.run(
+            ['git', '--version'],
+            capture_output=True, text=True, timeout=3, cwd=PROJECT_ROOT
+        )
+        if git_check.returncode != 0:
+            return get_production_fallback_version()
+        
         # コミットハッシュ取得
         res_hash = subprocess.run(
             ['git', 'rev-parse', '--short', 'HEAD'],
@@ -36,8 +49,10 @@ def get_git_commit_info() -> Tuple[str, str, str]:
         # バージョン番号を決定
         version = determine_version_from_commits()
         return version, date, commit_hash
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError, OSError):
+        return get_production_fallback_version()
     except Exception as e:
-        return get_fallback_version()
+        return get_production_fallback_version()
 
 def determine_version_from_commits() -> str:
     """
@@ -95,10 +110,74 @@ def get_fallback_version() -> Tuple[str, str, str]:
     current_date = datetime.now().strftime("%Y-%m-%d")
     return "1.0.0", current_date, "unknown"
 
+def get_production_fallback_version() -> Tuple[str, str, str]:
+    """
+    本番環境用のフォールバック（環境変数やビルド情報を使用）
+    """
+    import os
+    import json
+    
+    # まず version.json ファイルからの読み取りを試行
+    version_file = os.path.join(PROJECT_ROOT, 'version.json')
+    if os.path.exists(version_file):
+        try:
+            with open(version_file, 'r', encoding='utf-8') as f:
+                version_data = json.load(f)
+                return (
+                    version_data.get('version', '1.0.0'),
+                    version_data.get('build_date', datetime.now().strftime("%Y-%m-%d")),
+                    version_data.get('commit_hash', 'prod')
+                )
+        except (json.JSONDecodeError, KeyError, IOError):
+            pass
+    
+    # 環境変数からバージョン情報を取得（Railway, Heroku等で設定可能）
+    version = os.environ.get('APP_VERSION', '1.0.0')
+    commit_hash = os.environ.get('RAILWAY_GIT_COMMIT_SHA', os.environ.get('HEROKU_SLUG_COMMIT', 'prod'))[:7]
+    deploy_date = os.environ.get('DEPLOY_DATE', datetime.now().strftime("%Y-%m-%d"))
+    
+    return version, deploy_date, commit_hash
+
+def get_production_repo_info() -> dict:
+    """
+    本番環境用のリポジトリ情報
+    """
+    import os
+    import json
+    
+    # まず version.json ファイルからの読み取りを試行
+    version_file = os.path.join(PROJECT_ROOT, 'version.json')
+    if os.path.exists(version_file):
+        try:
+            with open(version_file, 'r', encoding='utf-8') as f:
+                version_data = json.load(f)
+                return {
+                    "branch": version_data.get('branch', 'main'),
+                    "remote_url": version_data.get('repository_url', 'https://github.com/macky337/study-app-project.git'),
+                    "commit_count": version_data.get('commit_count', 0)
+                }
+        except (json.JSONDecodeError, KeyError, IOError):
+            pass
+    
+    # 環境変数からブランチ情報を取得
+    branch = os.environ.get('RAILWAY_GIT_BRANCH', os.environ.get('HEROKU_BRANCH', 'main'))
+    remote_url = os.environ.get('REPOSITORY_URL', 'https://github.com/macky337/study-app-project.git')
+    
+    return {
+        "branch": branch,
+        "remote_url": remote_url,
+        "commit_count": 0  # 本番環境では取得困難
+    }
+
 def get_commit_count() -> int:
     """
     総コミット数を取得
     """
+    # 本番環境チェック
+    git_dir = os.path.join(PROJECT_ROOT, '.git')
+    if not os.path.exists(git_dir):
+        return 0
+        
     try:
         result = subprocess.run(
             ['git', 'rev-list', '--count', 'HEAD'],
@@ -110,6 +189,8 @@ def get_commit_count() -> int:
         else:
             return 0
             
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError, OSError, ValueError):
+        return 0
     except Exception:
         return 0
 
@@ -117,7 +198,20 @@ def get_repository_info() -> dict:
     """
     リポジトリの詳細情報を取得
     """
+    # 本番環境チェック
+    git_dir = os.path.join(PROJECT_ROOT, '.git')
+    if not os.path.exists(git_dir):
+        return get_production_repo_info()
+        
     try:
+        # Gitコマンドの存在確認
+        git_check = subprocess.run(
+            ['git', '--version'],
+            capture_output=True, text=True, timeout=3, cwd=PROJECT_ROOT
+        )
+        if git_check.returncode != 0:
+            return get_production_repo_info()
+            
         # ブランチ名取得
         branch_result = subprocess.run(
             ['git', 'branch', '--show-current'],
@@ -142,12 +236,10 @@ def get_repository_info() -> dict:
             "commit_count": commit_count
         }
         
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError, OSError):
+        return get_production_repo_info()
     except Exception as e:
-        return {
-            "branch": "unknown",
-            "remote_url": "unknown", 
-            "commit_count": 0
-        }
+        return get_production_repo_info()
 
 if __name__ == "__main__":
     # テスト実行
