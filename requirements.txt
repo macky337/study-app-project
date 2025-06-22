@@ -50,7 +50,7 @@ Markdown==3.7
 markdown-it-py==3.0.0
 markdownlit==0.0.7
 MarkupSafe==3.0.2
-matplotlib==3.10.0
+matplotlib>=3.7,<3.10
 mdurl==0.1.2
 more-itertools==10.6.0
 multidict==6.4.4
@@ -98,7 +98,7 @@ requests-toolbelt==1.0.0
 rfc3986==1.5.0
 rich==13.9.4
 rpds-py==0.22.3
-scipy==1.14.1
+scipy>=1.9,<1.14
 seaborn==0.13.2
 semver==2.13.0
 setuptools==78.1.0

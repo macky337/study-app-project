@@ -487,68 +487,227 @@ def render_ai_generation_tab(session):
         st.error("AI問題生成機能が利用できません（QuestionGeneratorがインポートできません）")
 
 def render_pdf_generation_tab(session):
-    """PDF問題生成タブ"""
-    st.markdown("### 📄 PDF問題生成")
+    """PDF問題生成・抽出タブ"""
+    st.markdown("### 📄 PDF問題処理")
+    
+    # 処理方法の選択
+    processing_method = st.radio(
+        "処理方法を選択してください",
+        options=[
+            "📄 PDF問題抽出（既存問題の抽出）",
+            "🤖 AI問題生成（PDF内容基準）"
+        ],
+        help="📄 抽出: PDFから既存の問題・選択肢・解答を読み取り\n🤖 生成: PDFの内容を参考にAIが新しい問題を作成",
+        key="pdf_processing_method"
+    )
+    
+    st.markdown("---")
+    
+    if processing_method == "📄 PDF問題抽出（既存問題の抽出）":
+        render_pdf_extraction_section(session)
+    else:
+        render_pdf_ai_generation_section(session)
+
+
+def render_pdf_extraction_section(session):
+    """PDF問題抽出セクション"""
+    st.markdown("### 📄 PDF問題抽出")
+    st.markdown("**過去問PDFから既存の問題・選択肢・解答・解説を抽出して問題を作成します**")
     
     try:
-        from services.pdf_processor import PDFProcessor        # PDFジェネレーターの読み込み (エラー対策)
-        try:
-            # 標準インポートを試す
-            from services.pdf_question_generator import PDFQuestionGenerator
-            print("標準のPDFジェネレーターを使用")
-        except Exception as e:
-            print(f"標準インポートでエラー: {e}")
-            try:
-                # 代替手段: .finalファイルを直接実行
-                import sys
-                import os
-                import subprocess
-                
-                final_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-                                         "services", "pdf_question_generator.py.final")
-                
-                # モジュールをPythonで実行し、定義を取得
-                result = subprocess.run(
-                    [sys.executable, "-c", f"exec(open('{final_path}').read()); print('クラス読み込み成功')"],
-                    capture_output=True, text=True
-                )
-                
-                if "クラス読み込み成功" in result.stdout:
-                    # エラーなく読み込めたので.finalから直接クラスを取得
-                    from services.pdf_question_generator import PDFQuestionGenerator
-                    print("修正済みPDFジェネレーターを使用")
-                else:
-                    # フォールバック: 簡易PDFジェネレーター
-                    class PDFQuestionGenerator:
-                        """緊急用の簡易PDFジェネレーター"""
-                        def __init__(self, session, model_name="gpt-4o-mini"):
-                            self.session = session
-                        
-                        def generate_questions_from_pdf(self, text, **kwargs):
-                            st.error("PDFジェネレーターの読み込みに失敗しました。管理者に連絡してください。")
-                            return []
-                    
-                    print("緊急用PDFジェネレーターを使用")
-            except Exception as fallback_error:
-                print(f"代替読み込みでもエラー: {fallback_error}")
-                # 最終フォールバック: 簡易PDFジェネレーター
-                class PDFQuestionGenerator:
-                    """緊急用の簡易PDFジェネレーター"""
-                    def __init__(self, session, model_name="gpt-4o-mini"):
-                        self.session = session
-                    
-                    def generate_questions_from_pdf(self, text, **kwargs):
-                        st.error("PDFジェネレーターの読み込みに失敗しました。管理者に連絡してください。")
-                        return []
-                
-                print("最終緊急用PDFジェネレーターを使用")
+        from services.pdf_processor import PDFProcessor
+        from services.pdf_question_extractor import PDFQuestionExtractor
         
         # PDFファイルアップロード
         uploaded_file = st.file_uploader(
-            "PDFファイルを選択してください",
+            "過去問PDFファイルを選択してください",
             type=['pdf'],
             help="最大50MBまでのPDFファイルをアップロードできます",
             key="pdf_uploader"
+        )
+        
+        if uploaded_file is not None:
+            # ファイル情報表示
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("ファイル名", uploaded_file.name)
+            with col2:
+                st.metric("ファイルサイズ", f"{uploaded_file.size / 1024:.1f} KB")
+            with col3:
+                st.metric("ファイル形式", "PDF")            # 抽出パラメータ（PDF抽出用）
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                pdf_category = st.text_input(
+                    "問題カテゴリ",
+                    value="PDF教材",
+                    help="抽出された問題に設定するカテゴリ",
+                    key="pdf_extract_category"
+                )
+            
+            with col2:
+                max_questions = st.number_input(
+                    "最大抽出問題数",
+                    min_value=1, max_value=100, value=20,
+                    help="抽出する問題の最大数（制限なしの場合は大きな数値に設定）",
+                    key="pdf_max_questions"
+                )
+            
+            with col3:
+                enable_unlimited = st.checkbox(
+                    "制限なし",
+                    value=False,
+                    help="チェックすると全ての問題を抽出します",
+                    key="pdf_unlimited"
+                )
+              # 詳細オプション
+            with st.expander("🔧 詳細オプション"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    similarity_threshold = st.slider(
+                        "重複判定閾値",
+                        min_value=0.5, max_value=1.0, value=0.8, step=0.05,
+                        help="この値より高い類似度の問題は重複として判定されます",
+                        key="pdf_extract_similarity"
+                    )
+                with col2:
+                    enable_duplicate_check = st.checkbox(
+                        "重複チェックを有効にする", 
+                        value=True,
+                        help="既存問題との重複をチェックしてスキップします",
+                        key="pdf_extract_duplicate_check"
+                    )
+            
+            # プライバシー保護の確認
+            privacy_confirmed = st.checkbox(
+                "🔒 プライバシー保護設定を理解し、PDFの処理に同意します",
+                help="PDFファイルはローカルで処理され、外部に送信されません",
+                key="pdf_privacy"            )
+            
+            if st.button("🎯 PDFから問題を抽出", disabled=not privacy_confirmed, key="extract_pdf"):
+                if not privacy_confirmed:
+                    st.warning("⚠️ プライバシー保護設定への同意が必要です")
+                    return
+                
+                with st.spinner("PDFから問題を抽出中..."):
+                    try:
+                        # PDF処理と問題抽出
+                        pdf_processor = PDFProcessor()
+                        pdf_extractor = PDFQuestionExtractor(session)
+                        
+                        # テキスト抽出
+                        uploaded_file.seek(0)
+                        file_bytes = uploaded_file.read()
+                        extracted_text = pdf_processor.extract_text_auto(file_bytes)
+                        
+                        if not extracted_text:
+                            st.error("PDFからテキストを抽出できませんでした")
+                            return
+                        
+                        # テキストのプレビュー表示
+                        with st.expander("📖 抽出されたテキスト（最初の500文字）"):
+                            st.text(extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text)
+                        
+                        # 進捗表示用コンテナ
+                        progress_container = st.empty()
+                        
+                        def progress_callback(message, progress):
+                            progress_container.progress(progress, text=message)                        # 問題抽出実行
+                        final_max_questions = None if enable_unlimited else max_questions
+                        
+                        extracted_ids = pdf_extractor.extract_questions_from_pdf(
+                            text=extracted_text,
+                            category=pdf_category,
+                            max_questions=final_max_questions,
+                            progress_callback=progress_callback,
+                            enable_duplicate_check=enable_duplicate_check,
+                            similarity_threshold=similarity_threshold
+                        )
+                        
+                        progress_container.empty()
+                        
+                        if extracted_ids:
+                            st.success(f"✅ {len(extracted_ids)}問の問題を抽出・保存しました！")
+                            
+                            # 抽出された問題の詳細表示
+                            with st.expander("📋 抽出された問題の詳細", expanded=True):
+                                from database.operations import QuestionService, ChoiceService
+                                question_service = QuestionService(session)
+                                choice_service = ChoiceService(session)
+                                
+                                for i, qid in enumerate(extracted_ids):
+                                    st.markdown(f"### 問題 {i+1} (ID: {qid})")
+                                    
+                                    # 問題の詳細を表示
+                                    question = question_service.get_question_by_id(qid)
+                                    if question:
+                                        st.markdown(f"**タイトル:** {question.title}")
+                                        st.markdown(f"**カテゴリ:** {question.category}")
+                                        st.markdown(f"**難易度:** {question.difficulty}")
+                                        st.markdown(f"**問題文:** {question.content}")
+                                        
+                                        # 選択肢を表示
+                                        choices = choice_service.get_choices_by_question_id(qid)
+                                        if choices:
+                                            st.markdown("**選択肢:**")
+                                            # 正解の数をカウント
+                                            correct_count = sum(1 for choice in choices if choice.is_correct)
+                                            
+                                            choice_labels = ['A', 'B', 'C', 'D', 'E', 'F']
+                                            for idx, choice in enumerate(sorted(choices, key=lambda x: x.order_num)):
+                                                label = choice_labels[idx] if idx < len(choice_labels) else str(idx + 1)
+                                                correct_mark = " ✅" if choice.is_correct else ""
+                                                st.markdown(f"{label}. {choice.content}{correct_mark}")
+                                        else:
+                                            st.warning("⚠️ 選択肢が見つかりませんでした")
+                                        
+                                        # 解説表示
+                                        if question.explanation:
+                                            st.markdown(f"**解説:** {question.explanation}")
+                                        else:
+                                            st.info("解説は抽出されませんでした")
+                                        
+                                        st.markdown("---")
+                        else:
+                            st.warning("PDFから問題を抽出できませんでした。問題の形式を確認してください。")
+                            st.markdown("**対応している問題形式:**")
+                            st.markdown("- 問1、問2...形式")
+                            st.markdown("- Q1、Q2...形式") 
+                            st.markdown("- 1.、2.、...形式")
+                            st.markdown("- 選択肢：(1)(2)(3)(4)、ア/イ/ウ/エ、A/B/C/D、①②③④")
+                    
+                    except Exception as e:
+                        st.error(f"エラーが発生しました: {str(e)}")
+                        print(f"PDF抽出エラー: {e}")
+        
+        else:
+            st.info("PDFファイルをアップロードしてください")
+            st.markdown("**PDF問題抽出について:**")
+            st.markdown("- 過去問PDFから既存の問題・選択肢・解答・解説を自動抽出")
+            st.markdown("- 複数の問題形式に対応（問1形式、Q1形式、番号形式等）")
+            st.markdown("- 重複チェック機能で既存問題との重複を防止")
+            st.markdown("- ローカル処理でプライバシー保護")
+    
+    except ImportError as e:
+        st.error(f"必要なライブラリがインストールされていません: {e}")
+    except Exception as e:
+        st.error(f"PDF問題抽出機能でエラーが発生しました: {e}")
+
+def render_pdf_ai_generation_section(session):
+    """PDF内容基準AI問題生成セクション"""
+    st.markdown("### 🤖 AI問題生成（PDF内容基準）")
+    st.markdown("**PDFの内容を参考にして、AIが新しい問題を生成します**")
+    
+    try:
+        from services.pdf_processor import PDFProcessor
+        from services.pdf_question_generator import PDFQuestionGenerator
+        
+        # PDFファイルアップロード
+        uploaded_file = st.file_uploader(
+            "参考資料PDFファイルを選択してください",
+            type=['pdf'],
+            help="最大50MBまでのPDFファイルをアップロードできます",
+            key="pdf_ai_uploader"
         )
         
         if uploaded_file is not None:
@@ -565,17 +724,19 @@ def render_pdf_generation_tab(session):
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                pdf_num_questions = st.slider("生成問題数", min_value=1, max_value=30, value=10, key="pdf_questions")
+                pdf_num_questions = st.slider("生成問題数", min_value=1, max_value=30, value=5, key="pdf_ai_questions")
             
-            with col2:                pdf_difficulty = st.selectbox(
+            with col2:
+                pdf_difficulty = st.selectbox(
                     "難易度",
                     ["easy", "medium", "hard"],
                     format_func=lambda x: {"easy": "初級", "medium": "中級", "hard": "上級"}[x],
-                    key="pdf_difficulty"
+                    index=1,
+                    key="pdf_ai_difficulty"
                 )
             
             with col3:
-                pdf_category = st.text_input("カテゴリ名", "PDF教材", key="pdf_category")
+                pdf_category = st.text_input("カテゴリ名", "PDF教材", key="pdf_ai_category")
             
             # 詳細オプション
             with st.expander("🔧 詳細オプション"):
@@ -590,47 +751,37 @@ def render_pdf_generation_tab(session):
                     "使用するAIモデル",
                     options=list(model_options.keys()),
                     format_func=lambda x: model_options[x],
-                    index=0,
-                    key="pdf_model"
+                    index=1,
+                    key="pdf_ai_model"
                 )
                 
-                pdf_include_explanation = st.checkbox("解説を含める", value=True, key="pdf_explanation")
-                pdf_chunk_size = st.slider("テキスト分割サイズ", min_value=500, max_value=3000, value=1500, key="pdf_chunk_size")
-                pdf_overlap = st.slider("オーバーラップサイズ", min_value=50, max_value=500, value=200, key="pdf_overlap")
-                
-                st.markdown("**処理オプション:**")
-                col1, col2 = st.columns(2)
-                with col1:
-                    extract_method = st.radio(
-                        "抽出方法",
-                        ["自動", "OCR", "テキスト"],
-                        help="自動: 最適な方法を自動選択、OCR: 画像からテキスト抽出、テキスト: 直接テキスト抽出",
-                        key="pdf_extract_method"
-                    )
-                with col2:
-                    quality_check = st.checkbox("品質チェックを有効にする", value=True, key="pdf_quality_check")
-                    pdf_allow_multiple_correct = st.checkbox("複数正解問題を生成可能にする", value=False, 
-                                                       help="チェックすると複数の正解を持つ問題が生成される可能性があります。チェックしない場合は1つの正解のみの問題が生成されます。", 
-                                                       key="pdf_multiple_correct")
+                pdf_include_explanation = st.checkbox("解説を含める", value=True, key="pdf_ai_explanation")
+                pdf_allow_multiple_correct = st.checkbox(
+                    "複数正解問題を生成可能にする", 
+                    value=False,
+                    help="チェックすると複数の正解を持つ問題が生成される可能性があります",
+                    key="pdf_ai_multiple_correct"
+                )
             
             # プライバシー保護の確認
             privacy_confirmed = st.checkbox(
                 "🔒 プライバシー保護設定を理解し、PDFの処理に同意します",
                 help="アップロードされたPDFの内容はOpenAIの学習データとして使用されません",
-                key="pdf_privacy"
+                key="pdf_ai_privacy"
             )
             
-            if st.button("🎯 PDFから問題を生成", disabled=not privacy_confirmed, key="generate_pdf"):
+            if st.button("🎯 AIで問題を生成", disabled=not privacy_confirmed, key="generate_pdf_ai"):
                 if not privacy_confirmed:
                     st.warning("⚠️ プライバシー保護設定への同意が必要です")
                     return
                 
-                with st.spinner("PDFを処理中..."):
+                with st.spinner("AIが問題を生成中..."):
                     try:
-                        # PDF処理
+                        # PDF処理と問題生成
                         pdf_processor = PDFProcessor()
-                        pdf_generator = PDFQuestionGenerator(session)
-                          # テキスト抽出
+                        pdf_generator = PDFQuestionGenerator(session, model_name=pdf_selected_model)
+                        
+                        # テキスト抽出
                         uploaded_file.seek(0)
                         file_bytes = uploaded_file.read()
                         extracted_text = pdf_processor.extract_text_auto(file_bytes)
@@ -639,7 +790,17 @@ def render_pdf_generation_tab(session):
                             st.error("PDFからテキストを抽出できませんでした")
                             return
                         
-                        # 問題生成（新しいパラメータを含む）
+                        # テキストのプレビュー表示
+                        with st.expander("📖 抽出されたテキスト（最初の500文字）"):
+                            st.text(extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text)
+                        
+                        # 進捗表示用コンテナ
+                        progress_container = st.empty()
+                        
+                        def progress_callback(message, progress):
+                            progress_container.progress(progress, text=message)
+                        
+                        # AI問題生成実行
                         generated_ids = pdf_generator.generate_questions_from_pdf(
                             text=extracted_text,
                             num_questions=pdf_num_questions,
@@ -647,8 +808,11 @@ def render_pdf_generation_tab(session):
                             category=pdf_category,
                             model=pdf_selected_model,
                             include_explanation=pdf_include_explanation,
+                            progress_callback=progress_callback,
                             allow_multiple_correct=pdf_allow_multiple_correct
                         )
+                        
+                        progress_container.empty()
                         
                         if generated_ids:
                             st.success(f"✅ {len(generated_ids)}問の問題を生成しました！")
@@ -671,14 +835,11 @@ def render_pdf_generation_tab(session):
                                         st.markdown(f"**問題文:** {question.content}")
                                         
                                         # 選択肢を表示
-                                        choices = choice_service.get_choices_by_question(qid)
+                                        choices = choice_service.get_choices_by_question_id(qid)
                                         if choices:
                                             st.markdown("**選択肢:**")
                                             # 正解の数をカウント
                                             correct_count = sum(1 for choice in choices if choice.is_correct)
-                                            # 複数正解の場合はマーカーを表示
-                                            if correct_count > 1:
-                                                st.markdown("🔄 **複数正解問題**")
                                             
                                             choice_labels = ['A', 'B', 'C', 'D', 'E', 'F']
                                             for idx, choice in enumerate(sorted(choices, key=lambda x: x.order_num)):
@@ -695,18 +856,20 @@ def render_pdf_generation_tab(session):
                                             st.info("解説は生成されませんでした")
                                         
                                         st.markdown("---")
-                                
-                                # 問題一覧への移動ボタン
-                                if st.button("📝 問題一覧で確認", type="secondary", use_container_width=True, key="pdf_view_list"):
-                                    st.info("問題一覧タブで生成された問題を確認できます")
                         else:
                             st.error("問題の生成に失敗しました")
-                            
+                    
                     except Exception as e:
-                        st.error(f"PDF処理でエラーが発生しました: {e}")
-                        
-    except ImportError:
-        st.error("PDF処理機能が利用できません（PDFProcessorがインポートできません）")
+                        st.error(f"エラーが発生しました: {str(e)}")
+                        print(f"PDF AI生成エラー: {e}")
+        
+        else:
+            st.info("PDFファイルをアップロードしてください")
+    
+    except ImportError as e:
+        st.error(f"必要なライブラリがインストールされていません: {e}")
+    except Exception as e:
+        st.error(f"PDF AI問題生成機能でエラーが発生しました: {e}")
 
 def render_duplicate_check_tab(question_service):
     """重複検査タブ"""

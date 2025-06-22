@@ -35,6 +35,7 @@ class QuestionService:
             print(f"❌ create_question DB保存エラー: {e}")
             import traceback
             print(traceback.format_exc())
+            self.session.rollback()  # ロールバックを追加
             return None
     
     def get_question_by_id(self, question_id: int) -> Optional[Question]:

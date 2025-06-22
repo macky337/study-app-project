@@ -210,7 +210,21 @@ JSONのみを出力し、他の文字は含めないでください。
             )
             
             # JSONパース
-            questions_data = json.loads(response)
+            if not response or response.strip() == "":
+                print("OpenAI APIから空のレスポンスを受信しました")
+                return []
+            
+            # レスポンスのクリーニング（マークダウンコードブロックなどを除去）
+            cleaned_response = response.strip()
+            if cleaned_response.startswith("```json"):
+                cleaned_response = cleaned_response[7:]
+            if cleaned_response.endswith("```"):
+                cleaned_response = cleaned_response[:-3]
+            cleaned_response = cleaned_response.strip()
+            
+            print(f"APIレスポンス（最初の200文字）: {cleaned_response[:200]}...")
+            
+            questions_data = json.loads(cleaned_response)
             
             # 問題をDBに保存
             question_ids = []
@@ -227,9 +241,11 @@ JSONのみを出力し、他の文字は含めないでください。
             
         except json.JSONDecodeError as e:
             print(f"JSON解析エラー: {e}")
+            print(f"レスポンス内容: {response[:500] if response else 'None'}...")
             return []
         except Exception as e:
-            print(f"問題生成エラー: {e}")
+            print(f"問題生成でエラーが発生しました: {e}")
+            print(f"レスポンス: {response[:200] if response else 'None'}...")
             return []
 
     def _save_question_to_db(
@@ -249,19 +265,19 @@ JSONのみを出力し、他の文字は含めないでください。
             
             question_service = QuestionService(self.session)
             choice_service = ChoiceService(self.session)
-            
-            # 重複チェック
+              # 重複チェック
             if enable_duplicate_check:
-                existing = question_service.find_similar_questions(
-                    question_data['content'], 
-                    threshold=similarity_threshold
+                duplicate_check = question_service.check_duplicate_before_creation(
+                    title=question_data.get('title', '無題'),
+                    content=question_data['content'],
+                    category=category,
+                    similarity_threshold=similarity_threshold
                 )
-                if existing:
-                    print(f"類似問題が既に存在するためスキップ: {question_data.get('title', '無題')}")
+                if duplicate_check["is_duplicate"]:
+                    print(f"類似問題が既に存在するためスキップ: {question_data.get('title', '無題')} (類似度: {duplicate_check['highest_similarity']:.2f})")
                     return None
-            
-            # 問題を保存
-            question_id = question_service.create_question(
+              # 問題を保存
+            question = question_service.create_question(
                 title=question_data.get('title', '無題'),
                 content=question_data['content'],
                 category=category,
@@ -269,8 +285,10 @@ JSONのみを出力し、他の文字は含めないでください。
                 explanation=question_data.get('explanation', '')
             )
             
-            if not question_id:
+            if not question:
                 return None
+            
+            question_id = question.id
             
             # 選択肢を保存
             for order, choice in enumerate(question_data['choices']):

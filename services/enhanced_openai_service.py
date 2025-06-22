@@ -585,6 +585,24 @@ class EnhancedOpenAIService:
             print(f"ERROR: 予期しないエラー: {e}")
             raise
 
+    def generate_completion(
+        self,
+        prompt: str,
+        max_tokens: int = 1500,
+        temperature: float = 0.7,
+        system_message: str = "あなたは資格試験問題作成の専門家です。正確で教育的な問題を作成してください。"
+    ) -> Optional[str]:
+        """
+        PDF問題生成などで使用される汎用的な補完メソッド
+        call_openai_apiのラッパー
+        """
+        return self.call_openai_api(
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system_message=system_message
+        )
+
 def test_enhanced_openai_service():
     """Test the enhanced OpenAI service"""
     try:
