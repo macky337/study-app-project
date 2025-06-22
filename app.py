@@ -75,8 +75,8 @@ def render_home_page():
         - 📊 学習履歴と統計の管理
         - 🔄 間違えた問題の復習
         - 🤖 AI による問題自動生成
-        - 📄 PDFからの問題抽出
-        """)          # データベース統計を表示
+        - 📄 PDFからの問題抽出        """)          # データベース統計を表示
+        from config.app_config import check_database_connection
         db_available, db_error = check_database_connection()
         if db_available:
             try:

@@ -1,25 +1,44 @@
 # -*- coding: utf-8 -*-
 """
-アプリケーションバージョン情報管理
+アプリケーションバージョン情報管理（Git自動生成）
 """
 from datetime import datetime
 from database.connection import engine
 from contextlib import contextmanager
 import streamlit as st
 
-# アプリケーション情報
-APP_VERSION = "1.0.249"
-LAST_UPDATED = "2025-06-14"
 APP_NAME = "Study Quiz App"
 
 def get_app_info():
-    """アプリケーション情報を取得"""
-    return {
-        "version": APP_VERSION,
-        "last_updated": LAST_UPDATED,
-        "app_name": APP_NAME,
-        "current_date": datetime.now().strftime("%Y-%m-%d %H:%M")
-    }
+    """アプリケーション情報を取得（Git情報から自動生成）"""
+    try:
+        from config.git_version import get_git_commit_info, get_repository_info
+        
+        # Git情報を取得
+        version, last_updated, commit_hash = get_git_commit_info()
+        repo_info = get_repository_info()
+        
+        return {
+            "version": version,
+            "last_updated": last_updated,
+            "app_name": APP_NAME,
+            "current_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "commit_hash": commit_hash,
+            "branch": repo_info.get("branch", "unknown"),
+            "commit_count": repo_info.get("commit_count", 0)
+        }
+    except Exception as e:
+        # Git情報取得に失敗した場合のフォールバック
+        print(f"Git情報取得エラー: {e}")
+        return {
+            "version": "1.0.0",
+            "last_updated": datetime.now().strftime("%Y-%m-%d"),
+            "app_name": APP_NAME,
+            "current_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "commit_hash": "unknown",
+            "branch": "unknown",
+            "commit_count": 0
+        }
 
 def get_database_status():
     """データベース接続状況を取得"""
@@ -59,7 +78,7 @@ def render_system_info():
     
     # バージョン情報をコンパクトに表示
     st.markdown(f"**{app_info['app_name']}** v{app_info['version']}")
-    st.caption(f"最終更新: {app_info['last_updated']}")
+    st.caption(f"最終更新: {app_info['last_updated']} (#{app_info['commit_count']})")
     
     # データベース状況をステータスバッジ風に表示
     db_status = get_database_status()
@@ -78,6 +97,8 @@ def render_system_info():
         
         with col1:
             st.markdown("**アプリ**")
+            st.caption(f"コミット: {app_info['commit_hash']}")
+            st.caption(f"ブランチ: {app_info['branch']}")
             st.caption(f"現在時刻: {app_info['current_date']}")
             if hasattr(st.session_state, 'session_id'):
                 st.caption(f"セッション: {st.session_state.session_id[-8:]}")
