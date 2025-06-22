@@ -25,6 +25,10 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+*_temp.py
+*_backup.py
+*.backup
+*.bak
 
 # Test and debug files
 test_*.py
