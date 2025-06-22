@@ -25,6 +25,33 @@ def configure_page():
         initial_sidebar_state="expanded"
     )
 
+def hide_streamlit_navigation():
+    """Streamlitのマルチページナビゲーションを非表示にする"""
+    hide_streamlit_style = """
+    <style>
+    /* Streamlitのマルチページナビゲーションを完全に非表示 */
+    [data-testid="stSidebarNav"] {
+        display: none !important;
+    }
+    
+    /* サイドバーの不要なナビゲーション要素を非表示 */
+    .css-1d391kg {
+        display: none !important;
+    }
+    
+    /* ページリンク全体を非表示 */
+    section[data-testid="stSidebarNav"] {
+        display: none !important;
+    }
+    
+    /* ナビゲーションリストを非表示 */
+    ul[data-testid="stSidebarNavItems"] {
+        display: none !important;
+    }
+    </style>
+    """
+    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
 # データベース接続変数
 DATABASE_AVAILABLE = False
 DATABASE_ERROR = None
@@ -36,26 +63,49 @@ def ensure_models_loaded():
     global _models_loaded
     if not _models_loaded:
         try:
-            # SQLModelのメタデータをクリアして重複定義を回避
-            from sqlmodel import SQLModel
-            SQLModel.metadata.clear()
+            # 既存のモデルインポートをチェック
+            import sys
             
-            # モデルをインポート
-            from models.question import Question
-            from models.choice import Choice
-            from models.user_answer import UserAnswer
+            # モデルが既にインポート済みの場合はスキップ
+            if ('models.question' in sys.modules and 
+                'models.choice' in sys.modules and 
+                'models.user_answer' in sys.modules):
+                print("✅ Models already loaded, skipping reload")
+                _models_loaded = True
+                return
+            
+            # モデルを直接インポート（クリア処理なし）
+            try:
+                from models.question import Question
+                print("✅ Question model imported")
+            except Exception as e:
+                print(f"❌ Question model import failed: {e}")
+                raise
+                
+            try:
+                from models.choice import Choice  
+                print("✅ Choice model imported")
+            except Exception as e:
+                print(f"❌ Choice model import failed: {e}")
+                raise
+                
+            try:
+                from models.user_answer import UserAnswer
+                print("✅ UserAnswer model imported")
+            except Exception as e:
+                print(f"❌ UserAnswer model import failed: {e}")
+                raise
             
             _models_loaded = True
+            print("✅ Models loaded successfully")
         except Exception as e:
-            print(f"Model loading error: {e}")
-            pass  # モデル読み込み失敗は無視
+            print(f"❌ Model loading error: {e}")
+            _models_loaded = False
+            raise
 
 def check_database_connection():
     """リアルタイムでデータベース接続状態をチェック"""
     try:
-        # モデルが確実に読み込まれるように
-        ensure_models_loaded()
-        
         from database.connection import engine
         if engine is not None:
             with engine.connect() as conn:
@@ -123,15 +173,15 @@ def initialize_database():
         return DATABASE_AVAILABLE, DATABASE_ERROR
     
     try:
-        # モデルを事前に読み込み（エラー無視で高速化）
-        ensure_models_loaded()
-        
-        from database.connection import engine
+        from database.connection import engine, ensure_tables_with_sqlmodel
         
         if engine is not None:
             DATABASE_AVAILABLE = True
             DATABASE_ERROR = None
             print("✅ Database connection ready")
+            
+            # テーブルを確実に作成
+            ensure_tables_with_sqlmodel()
         else:
             raise Exception("Database engine is None")
             

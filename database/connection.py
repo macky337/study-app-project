@@ -89,7 +89,7 @@ else:
                         """))
                         
                         connection.execute(text("""
-                            CREATE TABLE IF NOT EXISTS useranswer (
+                            CREATE TABLE IF NOT EXISTS user_answer (
                                 id SERIAL PRIMARY KEY,
                                 question_id INTEGER REFERENCES question(id) ON DELETE CASCADE,
                                 selected_choice_id INTEGER REFERENCES choice(id) ON DELETE CASCADE,
@@ -258,6 +258,27 @@ def create_tables():
         except Exception as sql_error:
             print(f"❌ Alternative table creation also failed: {sql_error}")
             return False
+
+
+def ensure_tables_with_sqlmodel():
+    """SQLModelを使ってテーブルを確実に作成"""
+    if engine is None:
+        print("❌ Cannot create tables: engine is None")
+        return False
+    
+    try:
+        # モデルをインポートしてからテーブル作成
+        from models.question import Question
+        from models.choice import Choice  
+        from models.user_answer import UserAnswer
+        
+        # SQLModelのcreate_allでテーブル作成
+        SQLModel.metadata.create_all(engine)
+        print("✅ Tables created successfully with SQLModel.create_all")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to create tables with SQLModel: {e}")
+        return False
 
 
 def init_database():

@@ -610,6 +610,65 @@ class QuestionService:
         
         return validation_result
 
+    def get_invalid_questions(self) -> List[Question]:
+        """
+        不正な問題を抽出：
+        - 問題文(content)が空
+        - 解説(explanation)が空またはNone
+        - 4択なのに選択肢が5つ以上
+        - 問題文の先頭に数字や【問〇】などの不要なパターンがある
+        - 文字化け（ﾄ、ﾆ、ｱなどの半角カタカナ）が含まれている
+        - 選択肢に正解が複数ある
+        - 選択肢に正解がない
+        """
+        import re
+        invalid_questions = []
+        all_questions = self.get_all_questions()
+        choice_service = ChoiceService(self.session)
+        
+        for q in all_questions:
+            # 問題文が空
+            if not q.content or q.content.strip() == "":
+                invalid_questions.append(q)
+                continue
+                
+            # 解説が空
+            if not q.explanation or str(q.explanation).strip() == "" or str(q.explanation) == "解説を抽出できませんでした。":
+                invalid_questions.append(q)
+                continue
+                
+            # 問題文の先頭に数字や【問〇】パターンがある
+            content = q.content.strip()
+            if re.match(r'^\d+\s*【問\d+】', content) or re.match(r'^\d+\s+【問\d+】', content):
+                invalid_questions.append(q)
+                continue
+                
+            # 文字化け（半角カタカナ）を検出
+            if re.search(r'[ｱ-ﾝ]', content):
+                invalid_questions.append(q)
+                continue
+                
+            # 選択肢のチェック
+            choices = choice_service.get_choices_by_question_id(q.id)
+            
+            # 4択なのに選択肢が5つ以上
+            if len(choices) > 4:
+                invalid_questions.append(q)
+                continue
+                
+            # 正解がない
+            correct_choices = [c for c in choices if c.is_correct]
+            if len(correct_choices) == 0:
+                invalid_questions.append(q)
+                continue
+                
+            # 正解が複数ある（通常は1つであるべき）
+            if len(correct_choices) > 1:
+                invalid_questions.append(q)
+                continue
+                
+        return invalid_questions
+    
 class ChoiceService:
     """選択肢関連の操作"""
     

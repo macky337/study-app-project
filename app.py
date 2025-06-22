@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.WARNING, format='%(levelname)s - %(message)s')
 
 # 設定とページのインポート
 try:
-    from config.app_config import initialize_database, initialize_session_state, PAGES, configure_page
+    from config.app_config import initialize_database, initialize_session_state, PAGES, configure_page, hide_streamlit_navigation, ensure_models_loaded
     from config.version_info import render_system_info
     from app_pages.quiz_page import quiz_page
     from app_pages.statistics_page import render_statistics_page
@@ -20,6 +20,19 @@ try:
     
     # ページ設定（最初に実行する必要がある）
     configure_page()
+    # Streamlitナビゲーションを非表示
+    hide_streamlit_navigation()
+    
+    # モデルの重複登録を防ぐため、アプリ起動時に一度クリア
+    if 'app_initialized' not in st.session_state:
+        try:
+            ensure_models_loaded()
+            st.session_state.app_initialized = True
+            print("✅ App models initialized successfully")
+        except Exception as model_error:
+            print(f"⚠️ Model initialization warning: {model_error}")
+            st.session_state.app_initialized = True  # エラーでも続行
+    
 except ImportError as e:
     st.error(f"必要なモジュールのインポートに失敗しました: {e}")
     st.stop()

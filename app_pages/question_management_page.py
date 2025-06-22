@@ -179,7 +179,148 @@ def render_question_list_tab(question_service, choice_service):
                     render_edit_question_modal(question, question_service, choice_service)
             
             with col2:
-                render_delete_question_button(question, question_service)
+                render_delete_question_button(question, question_service)    # --- 不正な問題抽出・一括削除 ---
+    st.markdown("---")
+    st.markdown("### 🚨 不正な問題の抽出・一括削除")
+    
+    # 抽出処理中のフラグをチェック
+    extraction_in_progress = st.session_state.get('extraction_in_progress', False)
+    
+    if st.button("🔍 不正な問題を抽出", key="extract_invalid_questions", disabled=extraction_in_progress):
+        # 処理開始フラグを設定
+        st.session_state['extraction_in_progress'] = True
+        st.rerun()
+    
+    # 抽出処理中の表示
+    if extraction_in_progress:
+        with st.spinner("不正な問題を検索中..."):
+            try:
+                # 少し時間をかけて検索処理を実行
+                import time
+                time.sleep(0.5)  # UIの表示を確実にする
+                
+                invalid_questions = question_service.get_invalid_questions()
+                invalid_question_ids = [q.id for q in invalid_questions]
+                st.session_state['invalid_questions'] = invalid_question_ids
+                
+                # 処理完了フラグをクリア
+                st.session_state['extraction_in_progress'] = False
+                
+                # 結果をセッション状態に保存
+                if invalid_question_ids:
+                    st.session_state['extraction_result'] = f"🔍 検索完了: {len(invalid_question_ids)} 件の不正な問題が見つかりました"
+                    st.session_state['extraction_success'] = True
+                else:
+                    st.session_state['extraction_result'] = "✅ 不正な問題は見つかりませんでした"
+                    st.session_state['extraction_success'] = True
+                
+                # ページを再描画して結果を表示
+                st.rerun()
+                
+            except Exception as e:
+                st.session_state['extraction_in_progress'] = False
+                st.session_state['extraction_result'] = f"不正な問題の抽出中にエラーが発生しました: {e}"
+                st.session_state['extraction_success'] = False
+                st.rerun()
+    
+    # 抽出結果の表示
+    if st.session_state.get('extraction_success', False):
+        result_message = st.session_state.get('extraction_result', '')
+        if 'エラー' in result_message:
+            st.error(result_message)
+        elif '見つかりませんでした' in result_message:
+            st.info(result_message)
+        else:
+            st.success(result_message)
+        
+        # 結果表示後にフラグをクリア（次回用）
+        if st.button("✖️ メッセージを閉じる", key="close_extraction_result"):
+            st.session_state.pop('extraction_result', None)
+            st.session_state.pop('extraction_success', None)
+            st.rerun()
+    
+    # 不正な問題の一括削除UI
+    invalid_ids = st.session_state.get('invalid_questions', [])
+    if invalid_ids:
+        try:
+            invalid_questions = [q for q in question_service.get_all_questions() if q.id in invalid_ids]
+            st.warning(f"不正な問題が {len(invalid_questions)} 件見つかりました。下記リストから選択して一括削除できます。")
+            
+            # 不正な問題の詳細表示
+            with st.expander("🔍 不正な問題の詳細を確認", expanded=False):
+                for q in invalid_questions:
+                    st.markdown(f"**ID {q.id}:** {q.title} ({q.category})")
+                    # 不正な理由も表示できるように
+                    try:
+                        choices = choice_service.get_choices_by_question_id(q.id)
+                        if not choices or len(choices) == 0:
+                            st.error("→ 理由: 選択肢が存在しません")
+                        elif not any(c.is_correct for c in choices):
+                            st.error("→ 理由: 正解が設定されていません")
+                        elif len([c for c in choices if c.is_correct]) > 4:
+                            st.warning("→ 理由: 正解が多すぎます（5個以上）")
+                        else:
+                            # 詳細な理由チェック
+                            if not q.content or q.content.strip() == "":
+                                st.error("→ 理由: 問題文が空です")
+                            elif not q.explanation or str(q.explanation).strip() == "":
+                                st.error("→ 理由: 解説が空です")
+                            elif len(choices) > 4:
+                                st.warning("→ 理由: 選択肢が多すぎます（5個以上）")
+                    except Exception as e:
+                        st.error(f"→ 理由チェック中にエラー: {e}")
+            
+            selected_ids = st.multiselect(
+                "削除対象の問題IDを選択（複数選択可）",
+                [q.id for q in invalid_questions],
+                default=[q.id for q in invalid_questions],
+                format_func=lambda x: f"ID {x} : {next((q.title for q in invalid_questions if q.id==x), '')}"
+            )
+            
+            if selected_ids:
+                st.info(f"選択中: {len(selected_ids)} 件の問題が削除対象です")
+                
+                if st.button("🗑️ 選択した不正な問題を一括削除", key="delete_invalid_questions"):
+                    with st.spinner("削除処理中..."):
+                        deleted = 0
+                        failed = 0
+                        for qid in selected_ids:
+                            try:
+                                if question_service.delete_question(qid):
+                                    deleted += 1
+                                else:
+                                    failed += 1
+                            except Exception as e:
+                                st.error(f"問題ID {qid} の削除でエラー: {e}")
+                                failed += 1
+                        
+                        if deleted > 0:
+                            st.success(f"✅ {deleted}件の不正な問題を削除しました！")
+                        if failed > 0:
+                            st.warning(f"⚠️ {failed}件の削除に失敗しました")
+                        
+                        # セッション状態をクリア
+                        st.session_state.pop('invalid_questions', None)
+                        st.session_state.pop('extraction_result', None)
+                        st.session_state.pop('extraction_success', None)
+                        
+                        # キャッシュをクリア
+                        for key in list(st.session_state.keys()):
+                            if key.startswith('questions_cache_'):
+                                del st.session_state[key]
+                        
+                        st.rerun()
+            else:
+                st.info("削除する問題を選択してください")
+                
+        except Exception as e:
+            st.error(f"不正な問題の表示中にエラーが発生しました: {e}")
+    else:
+        # 抽出済みでない場合の説明
+        if not st.session_state.get('extraction_success', False):
+            st.info("👆 上のボタンをクリックして、不正な問題（選択肢がない、正解がない等）を抽出できます")
+    st.markdown("---")
+    # --- ここまで不正な問題抽出 ---
 
 def render_ai_generation_tab(session):
     """AI問題生成タブ"""

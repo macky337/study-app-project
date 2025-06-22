@@ -109,7 +109,7 @@ def display_question_result(user_answer, question, choices: List[Any]):
         return
     
     # 結果のヘッダー
-    is_correct = user_answer.get('is_correct', False) if isinstance(user_answer, dict) else getattr(user_answer, 'is_correct', False)
+    is_correct = getattr(user_answer, 'is_correct', False)
     
     if is_correct:
         st.success("🎉 正解です！")
@@ -117,52 +117,31 @@ def display_question_result(user_answer, question, choices: List[Any]):
         st.error("❌ 不正解です")
     
     # 回答時間の表示
-    answer_time = user_answer.get('answer_time', None) if isinstance(user_answer, dict) else getattr(user_answer, 'response_time_seconds', None)
-    if answer_time:
-        st.info(f"⏱️ 回答時間: {answer_time:.1f}秒")
+    if hasattr(user_answer, 'response_time_seconds'):
+        response_time = user_answer.response_time_seconds
+        if response_time:
+            st.info(f"⏱️ 回答時間: {response_time:.1f}秒")
     
     # 選択肢の詳細表示
     st.markdown("### 📋 回答詳細")
     
-    # ユーザーの選択した選択肢ID
-    selected_choice_id = None
-    
-    if isinstance(user_answer, dict):
-        if 'selected_choice' in user_answer:
-            if isinstance(user_answer['selected_choice'], list):
-                # 複数選択の場合
-                selected_choice_ids = user_answer['selected_choice']
-            else:
-                # 単一選択の場合
-                selected_choice_ids = [user_answer['selected_choice']]
-    else:
-        if hasattr(user_answer, 'selected_choice_ids') and user_answer.selected_choice_ids:
-            selected_choice_ids = user_answer.selected_choice_ids
-            if isinstance(selected_choice_ids, str):
-                # 文字列形式の場合（例: "1,3,5"）
-                try:
-                    selected_choice_ids = [int(x.strip()) for x in selected_choice_ids.split(',') if x.strip()]
-                except ValueError:
-                    selected_choice_ids = []
+    # ユーザーの選択した選択肢
+    user_choices = []
+    if hasattr(user_answer, 'selected_choice_ids') and user_answer.selected_choice_ids:
+        user_choice_ids = user_answer.selected_choice_ids
+        if isinstance(user_choice_ids, str):
+            # 文字列形式の場合（例: "1,3,5"）
+            try:
+                user_choice_ids = [int(x.strip()) for x in user_choice_ids.split(',') if x.strip()]
+            except ValueError:
+                user_choice_ids = []
+        user_choices = [choice for choice in choices if choice.id in user_choice_ids]
     
     # 各選択肢の表示
     for i, choice in enumerate(choices):
-        choice_id = getattr(choice, 'id', None)
         choice_text = getattr(choice, 'content', f"選択肢 {i+1}")
+        is_user_selected = choice in user_choices
         is_correct_choice = getattr(choice, 'is_correct', False)
-        
-        # 選択されたかどうかの判定（ユーザーが選んだ選択肢インデックス）
-        is_user_selected = False
-        
-        if isinstance(user_answer, dict) and 'selected_choice' in user_answer:
-            if isinstance(user_answer['selected_choice'], list):
-                # 複数選択の場合
-                is_user_selected = choice_id in user_answer['selected_choice']
-            else:
-                # 単一選択の場合
-                is_user_selected = choice_id == user_answer['selected_choice']
-        elif 'selected_choice_ids' in locals():
-            is_user_selected = choice_id in selected_choice_ids
         
         # アイコンの決定
         if is_correct_choice and is_user_selected:
@@ -177,7 +156,8 @@ def display_question_result(user_answer, question, choices: List[Any]):
         else:
             icon = "⚪"  # 不正解かつ未選択
             color = "secondary"
-          # 選択肢の表示
+        
+        # 選択肢の表示
         prefix = f"**{chr(65+i)}.** "
         if color == "success":
             st.success(f"{icon} {prefix}{choice_text}")
@@ -189,10 +169,7 @@ def display_question_result(user_answer, question, choices: List[Any]):
             st.write(f"{icon} {prefix}{choice_text}")
     
     # 解説の表示
-    if isinstance(question, dict) and 'explanation' in question and question['explanation']:
-        st.markdown("### 💡 解説")
-        st.markdown(question['explanation'])
-    elif hasattr(question, 'explanation') and question.explanation:
+    if hasattr(question, 'explanation') and question.explanation:
         st.markdown("### 💡 解説")
         st.markdown(question.explanation)
     
