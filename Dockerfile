@@ -17,5 +17,5 @@ COPY . .
 # Streamlitのポート開放 (固定ポート8000)
 EXPOSE 8000
 
-# アプリ起動コマンド - カスタムスタートアップスクリプト使用
-CMD ["./start.sh"]
+# アプリ起動コマンド - Pythonランチャー使用で環境変数を完全制御
+CMD ["python", "launcher.py"]

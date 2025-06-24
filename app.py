@@ -3,6 +3,15 @@ Study Quiz App - メインアプリケーション
 ファイル分割後のルーターとして機能
 
 """
+import os
+
+# Railway対応: 問題のある環境変数を起動時に削除
+problematic_vars = ['PORT', 'STREAMLIT_SERVER_PORT']
+for var in problematic_vars:
+    if var in os.environ:
+        print(f"[RAILWAY_FIX] Removing {var}={os.environ[var]}")
+        del os.environ[var]
+
 import streamlit as st
 import logging
 
