@@ -8,18 +8,28 @@ import sys
 import subprocess
 
 def clean_environment():
-    """問題のある環境変数を削除"""
-    problematic_vars = ['PORT', 'STREAMLIT_SERVER_PORT']
+    """問題のある環境変数を削除・上書き"""
     
+    # まず全てのPORT関連環境変数を表示
+    print("Environment variables before cleanup:")
+    for key, value in os.environ.items():
+        if 'PORT' in key.upper():
+            print(f"  {key}={value}")
+    
+    # 問題のある環境変数を削除
+    problematic_vars = ['PORT', 'STREAMLIT_SERVER_PORT']
     for var in problematic_vars:
         if var in os.environ:
             print(f"Removing problematic environment variable: {var}={os.environ[var]}")
             del os.environ[var]
     
-    # 確認用
-    print("Current environment variables:")
+    # Streamlitが期待する環境変数を正しい値で設定
+    os.environ['STREAMLIT_SERVER_PORT'] = '8000'
+    os.environ['STREAMLIT_SERVER_ADDRESS'] = '0.0.0.0'
+    
+    print("Environment variables after cleanup:")
     for key, value in os.environ.items():
-        if 'PORT' in key.upper():
+        if 'PORT' in key.upper() or 'STREAMLIT' in key.upper():
             print(f"  {key}={value}")
 
 def launch_streamlit():
