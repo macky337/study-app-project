@@ -670,6 +670,69 @@ class QuestionService:
                 
         return invalid_questions
     
+    def update_question(self, question_id: int, update_data: dict) -> bool:
+        """問題を更新"""
+        try:
+            print(f"🔄 問題更新開始: ID {question_id}")
+            
+            # 問題を取得
+            question = self.session.get(Question, question_id)
+            if not question:
+                print(f"❌ 問題が見つかりません: ID {question_id}")
+                return False
+            
+            # 更新可能なフィールドを更新
+            if 'title' in update_data:
+                question.title = update_data['title']
+            if 'content' in update_data:
+                question.content = update_data['content']
+            if 'category' in update_data:
+                question.category = update_data['category']
+            if 'difficulty' in update_data:
+                question.difficulty = update_data['difficulty']
+            if 'explanation' in update_data:
+                question.explanation = update_data['explanation']
+            
+            # 更新日時を設定
+            question.updated_at = datetime.now()
+            
+            # コミット
+            self.session.commit()
+            self.session.refresh(question)
+            
+            print(f"✅ 問題ID {question_id} の更新完了")
+            return True
+            
+        except Exception as e:
+            print(f"❌ 問題更新エラー: {e}")
+            import traceback
+            print(f"📝 詳細エラー: {traceback.format_exc()}")
+            self.session.rollback()
+            return False
+
+    def update_choice(self, choice_id: int, content: str, is_correct: bool) -> bool:
+        """選択肢を更新"""
+        try:
+            # 選択肢を取得
+            choice = self.session.get(Choice, choice_id)
+            if not choice:
+                print(f"❌ 選択肢が見つかりません: ID {choice_id}")
+                return False
+            
+            # 更新
+            choice.content = content
+            choice.is_correct = is_correct
+            
+            self.session.commit()
+            print(f"✅ 選択肢ID {choice_id} の更新完了")
+            return True
+            
+        except Exception as e:
+            print(f"❌ 選択肢更新エラー: {e}")
+            self.session.rollback()
+            return False
+
+
 class ChoiceService:
     """選択肢関連の操作"""
     

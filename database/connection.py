@@ -10,7 +10,47 @@ load_dotenv()
 # グローバル変数でエンジンの初期化状態を管理
 _engine_initialized = False
 _initialization_lock = False
-_models_imported = False
+
+class DatabaseRegistry:
+    """シングルトンパターンでデータベース初期化の重複を防ぐ"""
+    _instance = None
+    _models_imported = False
+    _metadata_cleared = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def ensure_models_imported(self):
+        """モデルを一度だけインポート（重複定義を完全回避）"""
+        if self._models_imported:
+            return True
+            
+        try:
+            from sqlmodel import SQLModel
+            
+            # 一度だけメタデータをクリア
+            if not self._metadata_cleared:
+                SQLModel.metadata.clear()
+                self._metadata_cleared = True
+                print("🔄 SQLModel metadata cleared (database singleton)")
+            
+            # モデルをインポートしてSQLModelメタデータに登録
+            from models.question import Question
+            from models.choice import Choice  
+            from models.user_answer import UserAnswer
+            
+            self._models_imported = True
+            print("✅ Models imported successfully (database singleton)")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Model import error: {e}")
+            return False
+
+# シングルトンインスタンスを作成
+_db_registry = DatabaseRegistry()
 
 # Database URL with multiple fallbacks
 DATABASE_URL = (
@@ -32,18 +72,24 @@ else:
         try:
             print(f"🔗 Connecting to database...")
             
-            # PostgreSQL connection with proper encoding and SSL settings
+            # PostgreSQL connection settings - adjust for Docker environment
             connect_args = {
-                "client_encoding": "utf8",
-                "sslmode": "require"  # Railway requires SSL
+                "client_encoding": "utf8"
             }
+            
+            # Only require SSL for production/cloud databases
+            if "railway" in DATABASE_URL.lower() or "amazonaws" in DATABASE_URL.lower():
+                connect_args["sslmode"] = "require"
+            else:
+                # For local/Docker databases, don't require SSL
+                connect_args["sslmode"] = "prefer"
             
             engine = create_engine(
                 DATABASE_URL, 
                 echo=False,  # Set to False in production
                 pool_pre_ping=True,
                 connect_args=connect_args,
-                pool_timeout=5,  # 5秒タイムアウト（高速化）
+                pool_timeout=10,  # 10秒タイムアウト（Docker用に延長）
                 pool_recycle=1800,  # 30分で接続をリサイクル
                 pool_size=2,  # 小さなプールサイズで起動高速化
                 max_overflow=3  # オーバーフロー制限
@@ -51,14 +97,26 @@ else:
             
             print("✅ Database engine created successfully")
             
-            # 軽量な接続テスト
-            try:
-                with engine.connect() as connection:
-                    connection.execute(text("SELECT 1"))
-                    print("✅ Database connection test successful")
-            except Exception as test_error:
-                print(f"⚠️ Database connection test failed: {test_error}")
-                # 接続テストが失敗してもエンジンは作成済みなので続行
+            # リトライ機能付きの接続テスト
+            import time
+            max_retries = 30  # 最大30回リトライ（60秒）
+            retry_count = 0
+            
+            while retry_count < max_retries:
+                try:
+                    with engine.connect() as connection:
+                        connection.execute(text("SELECT 1"))
+                        print("✅ Database connection test successful")
+                        break
+                except Exception as test_error:
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        print(f"❌ Database connection failed after {max_retries} retries: {test_error}")
+                        # 接続失敗でもエンジンは保持（後でリトライ可能）
+                        break
+                    else:
+                        print(f"⏳ Database connection attempt {retry_count}/{max_retries} failed, retrying in 2 seconds...")
+                        time.sleep(2)
             
             # テーブル作成は別スレッドで実行（非ブロッキング）
             import threading
@@ -186,28 +244,19 @@ def safe_database_operation(operation_func):
 
 
 def create_tables():
-    """Create database tables"""
-    global _models_imported
+    """Create database tables using singleton pattern"""
     
     try:
-        # Import models to register them with SQLModel (only once)
-        if not _models_imported:
-            try:
-                # Clear metadata to avoid duplicate definitions
-                SQLModel.metadata.clear()
-                
-                from models.question import Question
-                from models.choice import Choice  
-                from models.user_answer import UserAnswer
-                _models_imported = True
-                print("📦 Models imported successfully")
-            except ImportError as e:
-                print(f"⚠️ Model import warning: {e}")
+        # シングルトンでモデルインポートを管理
+        if not _db_registry.ensure_models_imported():
+            print("❌ Failed to import models")
+            return False
         
         # Create tables only if they don't exist
         if engine is not None:
+            from sqlmodel import SQLModel
             SQLModel.metadata.create_all(engine, checkfirst=True)
-            print("✅ Database tables created successfully!")
+            print("✅ Tables created successfully with SQLModel.create_all")
             return True
         else:
             print("❌ Database engine is not available")
@@ -261,20 +310,20 @@ def create_tables():
 
 
 def ensure_tables_with_sqlmodel():
-    """SQLModelを使ってテーブルを確実に作成"""
+    """SQLModelを使ってテーブルを確実に作成（シングルトンパターン）"""
     if engine is None:
         print("❌ Cannot create tables: engine is None")
         return False
-    
     try:
-        # モデルをインポートしてからテーブル作成
-        from models.question import Question
-        from models.choice import Choice  
-        from models.user_answer import UserAnswer
+        # シングルトンでモデルインポートを管理
+        if not _db_registry.ensure_models_imported():
+            print("❌ Failed to import models for table creation")
+            return False
         
         # SQLModelのcreate_allでテーブル作成
+        from sqlmodel import SQLModel
         SQLModel.metadata.create_all(engine)
-        print("✅ Tables created successfully with SQLModel.create_all")
+        print("✅ Tables created successfully with SQLModel.create_all (singleton)")
         return True
     except Exception as e:
         print(f"❌ Failed to create tables with SQLModel: {e}")

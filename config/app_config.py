@@ -7,6 +7,9 @@ import logging
 # ロギング設定
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# グローバル変数
+_models_loaded = False
+
 # アプリケーションのページリスト
 PAGES = [
     "🏠 ホーム",
@@ -56,52 +59,75 @@ def hide_streamlit_navigation():
 DATABASE_AVAILABLE = False
 DATABASE_ERROR = None
 _db_initialized = False  # 初期化フラグ
-_models_loaded = False  # モデル読み込みフラグ
 
-def ensure_models_loaded():
-    """モデルを一度だけ読み込む（重複定義を回避）"""
-    global _models_loaded
-    if not _models_loaded:
+class ModelRegistry:
+    """シングルトンパターンでモデルの重複登録を防ぐ"""
+    _instance = None
+    _models_loaded = False
+    _registry_cleared = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def ensure_models_loaded(self):
+        """モデルを一度だけ読み込む（完全な重複定義回避）"""
+        if self._models_loaded:
+            print("✅ Models already loaded, skipping...")
+            return True
+            
         try:
-            # 既存のモデルインポートをチェック
-            import sys
+            from sqlmodel import SQLModel
             
-            # モデルが既にインポート済みの場合はスキップ
-            if ('models.question' in sys.modules and 
-                'models.choice' in sys.modules and 
-                'models.user_answer' in sys.modules):
-                print("✅ Models already loaded, skipping reload")
-                _models_loaded = True
-                return
+            # 一度だけメタデータをクリア
+            if not self._registry_cleared:
+                SQLModel.metadata.clear()
+                self._registry_cleared = True
+                print("🔄 SQLModel metadata cleared (singleton)")
             
-            # モデルを直接インポート（クリア処理なし）
-            try:
-                from models.question import Question
-                print("✅ Question model imported")
-            except Exception as e:
-                print(f"❌ Question model import failed: {e}")
-                raise
+            # モデルを直接インポート（確実に登録）
+            from models.question import Question
+            from models.choice import Choice  
+            from models.user_answer import UserAnswer
+            
+            # 手動でメタデータに強制登録
+            Question.metadata = SQLModel.metadata
+            Choice.metadata = SQLModel.metadata
+            UserAnswer.metadata = SQLModel.metadata
+            
+            # 登録確認
+            table_names = [table.name for table in SQLModel.metadata.tables.values()]
+            expected_tables = ['question', 'choice', 'user_answer']
+            
+            all_registered = True
+            for table_name in expected_tables:
+                if table_name not in table_names:
+                    print(f"⚠️ Table '{table_name}' not found in metadata")
+                    all_registered = False
+                else:
+                    print(f"✅ Table '{table_name}' registered successfully")
+            
+            if all_registered:
+                self._models_loaded = True
+                print("✅ All models loaded and verified successfully (singleton)")
+                return True
+            else:
+                # テーブルが見つからない場合も続行（SQLではテーブル作成される）
+                self._models_loaded = True
+                print("⚠️ Some tables not in metadata, but proceeding with SQL table creation")
+                return True
                 
-            try:
-                from models.choice import Choice  
-                print("✅ Choice model imported")
-            except Exception as e:
-                print(f"❌ Choice model import failed: {e}")
-                raise
-                
-            try:
-                from models.user_answer import UserAnswer
-                print("✅ UserAnswer model imported")
-            except Exception as e:
-                print(f"❌ UserAnswer model import failed: {e}")
-                raise
-            
-            _models_loaded = True
-            print("✅ Models loaded successfully")
         except Exception as e:
             print(f"❌ Model loading error: {e}")
-            _models_loaded = False
-            raise
+            return False
+
+# シングルトンインスタンスを作成
+_model_registry = ModelRegistry()
+
+def ensure_models_loaded():
+    """グローバル関数でモデル読み込みを呼び出し"""
+    return _model_registry.ensure_models_loaded()
 
 def check_database_connection():
     """リアルタイムでデータベース接続状態をチェック"""

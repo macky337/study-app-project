@@ -2,6 +2,8 @@
 問題管理ページ - 問題の一覧表示、AI生成、PDF処理、重複検査
 """
 import streamlit as st
+import time
+import datetime
 from datetime import datetime
 
 def render_question_management_page():
@@ -156,8 +158,7 @@ def render_question_list_tab(question_service, choice_service):
     for i, question in enumerate(current_questions):
         with st.expander(f"**{question['title']}** ({question['category']} / {question['difficulty']})"):
             st.markdown(f"**問題ID:** {question['id']}")
-            st.markdown(f"**内容:** {question['content']}")
-              # 選択肢表示
+            st.markdown(f"**内容:** {question['content']}")              # 選択肢表示
             choices = choice_service.get_choices_by_question_id(question['id'])
             if choices:
                 st.markdown("**選択肢:**")
@@ -170,16 +171,27 @@ def render_question_list_tab(question_service, choice_service):
                 for j, choice in enumerate(choices):
                     correct_mark = " ✅" if choice.is_correct else ""
                     st.markdown(f"{chr(65+j)}. {choice.content}{correct_mark}")
+            
             if question['explanation']:
                 st.markdown(f"**解説:** {question['explanation']}")
-              # 編集・削除ボタン
-            col1, col2 = st.columns([1, 1])
+              
+            # 検証結果の表示（もしあれば）
+            verification_key = f"verification_result_{question['id']}"
+            if verification_key in st.session_state:
+                verification_result = st.session_state[verification_key]
+                render_verification_result(verification_result)
+              # 編集・削除・検証ボタン
+            col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
                 if st.button(f"✏️ 編集", key=f"edit_{question['id']}"):
                     render_edit_question_modal(question, question_service, choice_service)
-            
             with col2:
-                render_delete_question_button(question, question_service)    # --- 不正な問題抽出・一括削除 ---
+                render_delete_question_button(question, question_service)
+            
+            with col3:
+                render_verify_question_button(question, choices)
+                
+# --- 不正な問題抽出・一括削除 ---
     st.markdown("---")
     st.markdown("### 🚨 不正な問題の抽出・一括削除")
     
@@ -325,26 +337,45 @@ def render_question_list_tab(question_service, choice_service):
 def render_ai_generation_tab(session):
     """AI問題生成タブ"""
     st.markdown("### 🤖 AI問題生成")
-    
     try:
         from services.question_generator import EnhancedQuestionGenerator as QuestionGenerator
-        
+        from database.operations import QuestionService
+        # --- カテゴリ一覧取得 ---
+        if 'ai_categories' not in st.session_state:
+            question_service = QuestionService(session)
+            db_categories = question_service.get_all_categories()
+            # デフォルトカテゴリも含める（重複排除）
+            default_categories = [
+                "基本情報技術者", "応用情報技術者", "プログラミング基礎", "データベース",
+                "ネットワーク", "セキュリティ", "AI・機械学習", "プロジェクトマネジメント"
+            ]
+            categories = list(dict.fromkeys(default_categories + db_categories))
+            st.session_state['ai_categories'] = categories
+        categories = st.session_state['ai_categories']
+
+        # --- 新規カテゴリ追加UI ---
+        with st.expander("🆕 新しいカテゴリを追加する"):
+            new_category = st.text_input("新規カテゴリ名", key="new_ai_category")
+            if st.button("カテゴリを追加", key="add_ai_category_btn"):
+                if new_category and new_category not in categories:
+                    st.session_state['ai_categories'].append(new_category)
+                    st.success(f"カテゴリ『{new_category}』を追加しました！")
+                elif new_category in categories:
+                    st.warning("すでに存在するカテゴリです")
+                else:
+                    st.warning("カテゴリ名を入力してください")
+
         # 生成パラメータ設定
         col1, col2 = st.columns([2, 1])
-        
         with col1:
             st.markdown("**生成パラメータ**")
-            
             gen_col1, gen_col2, gen_col3 = st.columns(3)
-            
             with gen_col1:
                 category = st.selectbox(
                     "カテゴリ",
-                    ["基本情報技術者", "応用情報技術者", "プログラミング基礎", "データベース",
-                     "ネットワーク", "セキュリティ", "AI・機械学習", "プロジェクトマネジメント"],
+                    categories,
                     key="ai_category"
                 )
-            
             with gen_col2:
                 difficulty = st.selectbox(
                     "難易度",
@@ -352,17 +383,14 @@ def render_ai_generation_tab(session):
                     format_func=lambda x: {"easy": "初級", "medium": "中級", "hard": "上級"}[x],
                     key="ai_difficulty"
                 )
-            
             with gen_col3:
                 count = st.slider("生成問題数", min_value=1, max_value=10, value=1, key="ai_count")
-            
             topic = st.text_area(
                 "特定のトピック（任意）",
                 placeholder="例: オブジェクト指向プログラミング、データベース正規化",
                 height=100,
                 key="ai_topic"
             )
-            
             # 詳細オプション
             with st.expander("🔧 詳細オプション"):
                 model_options = {
@@ -371,20 +399,18 @@ def render_ai_generation_tab(session):
                     "gpt-4o": "GPT-4o (最高品質)",
                     "gpt-4": "GPT-4 (最高品質・詳細)"
                 }
-                
                 selected_model = st.selectbox(
                     "使用するAIモデル",
                     options=list(model_options.keys()),
                     format_func=lambda x: model_options[x],
                     index=0,
-                    key="ai_model"                )
-                
+                    key="ai_model"
+                )
                 include_explanation = st.checkbox("解説を含める", value=True, key="ai_explanation")
                 enable_duplicate_check = st.checkbox("重複チェックを有効にする", value=True, key="ai_duplicate_check")
                 allow_multiple_correct = st.checkbox("複数正解問題を生成可能にする", value=False, 
                                                   help="チェックすると複数の正解を持つ問題が生成される可能性があります。チェックしない場合は1つの正解のみの問題が生成されます。", 
                                                   key="ai_multiple_correct")
-        
         with col2:
             st.markdown("**生成履歴**")
             if 'generation_history' in st.session_state and st.session_state.generation_history:
@@ -840,7 +866,10 @@ def render_pdf_ai_generation_section(session):
                                             st.markdown("**選択肢:**")
                                             # 正解の数をカウント
                                             correct_count = sum(1 for choice in choices if choice.is_correct)
-                                            
+                                            # 複数正解の場合はマーカーを表示
+                                            if correct_count > 1:
+                                                st.markdown("🔄 **複数正解問題**")
+                                        
                                             choice_labels = ['A', 'B', 'C', 'D', 'E', 'F']
                                             for idx, choice in enumerate(sorted(choices, key=lambda x: x.order_num)):
                                                 label = choice_labels[idx] if idx < len(choice_labels) else str(idx + 1)
@@ -877,72 +906,61 @@ def render_duplicate_check_tab(question_service):
     
     st.info("重複検査機能は今後実装予定です")
     
-    # 簡単な統計情報
-    try:
-        all_questions = question_service.get_random_questions(limit=1000)
-        st.metric("総問題数", len(all_questions))
-        
-        categories = {}
-        for q in all_questions:
-            categories[q.category] = categories.get(q.category, 0) + 1
-        
-        if categories:
-            st.markdown("**カテゴリ別問題数:**")
-            for category, count in sorted(categories.items()):
-                st.markdown(f"- {category}: {count}問")
-                
-    except Exception as e:
-        st.error(f"統計情報の取得でエラーが発生しました: {e}")
+    # 統計情報の表示を停止（エラー回避のため）
+    # try:
+    #     all_questions = question_service.get_random_questions(limit=1000)
+    #     st.metric("総問題数", len(all_questions))
+    #     categories = {}
+    #     for q in all_questions:
+    #         categories[q.category] = categories.get(q.category, 0) + 1
+    #     if categories:
+    #         st.markdown("**カテゴリ別問題数:**")
+    #         for category, count in sorted(categories.items()):
+    #             st.markdown(f"- {category}: {count}問")
+    # except Exception as e:
+    #     st.error(f"統計情報の取得でエラーが発生しました: {e}")
+
 
 def render_generation_stats_tab(question_service):
     """生成統計タブ"""
     st.markdown("### 📊 生成統計")
     
-    try:
-        all_questions = question_service.get_random_questions(limit=1000)
-        
-        # 基本統計
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("総問題数", len(all_questions))
-        
-        with col2:
-            categories = len(set(q.category for q in all_questions))
-            st.metric("カテゴリ数", categories)
-        
-        with col3:
-            difficulties = len(set(q.difficulty for q in all_questions))
-            st.metric("難易度数", difficulties)
-        
-        # カテゴリ別統計
-        if all_questions:
-            st.markdown("### 📚 カテゴリ別統計")
-            
-            category_stats = {}
-            difficulty_stats = {}
-            
-            for q in all_questions:
-                category_stats[q.category] = category_stats.get(q.category, 0) + 1
-                difficulty_stats[q.difficulty] = difficulty_stats.get(q.difficulty, 0) + 1
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**カテゴリ別分布:**")
-                for category, count in sorted(category_stats.items()):
-                    percentage = (count / len(all_questions)) * 100
-                    st.markdown(f"- {category}: {count}問 ({percentage:.1f}%)")
-            
-            with col2:
-                st.markdown("**難易度別分布:**")
-                for difficulty, count in sorted(difficulty_stats.items()):
-                    percentage = (count / len(all_questions)) * 100
-                    difficulty_name = {"easy": "初級", "medium": "中級", "hard": "上級"}.get(difficulty, difficulty)
-                    st.markdown(f"- {difficulty_name}: {count}問 ({percentage:.1f}%)")
-        
-    except Exception as e:
-        st.error(f"統計情報の取得でエラーが発生しました: {e}")
+    st.info("現在、統計情報の表示は一時的に停止しています（エラー回避のため）")
+    # 統計情報の表示を停止（エラー回避のため）
+    # try:
+    #     all_questions = question_service.get_random_questions(limit=1000)
+    #     # 基本統計
+    #     col1, col2, col3 = st.columns(3)
+    #     with col1:
+    #         st.metric("総問題数", len(all_questions))
+    #     with col2:
+    #         categories = len(set(q.category for q in all_questions))
+    #         st.metric("カテゴリ数", categories)
+    #     with col3:
+    #         difficulties = len(set(q.difficulty for q in all_questions))
+    #         st.metric("難易度数", difficulties)
+    #     # カテゴリ別統計
+    #     if all_questions:
+    #         st.markdown("### 📚 カテゴリ別統計")
+    #         category_stats = {}
+    #         difficulty_stats = {}
+    #         for q in all_questions:
+    #             category_stats[q.category] = category_stats.get(q.category, 0) + 1
+    #             difficulty_stats[q.difficulty] = difficulty_stats.get(q.difficulty, 0) + 1
+    #         col1, col2 = st.columns(2)
+    #         with col1:
+    #             st.markdown("**カテゴリ別分布:**")
+    #             for category, count in sorted(category_stats.items()):
+    #                 percentage = (count / len(all_questions)) * 100
+    #                 st.markdown(f"- {category}: {count}問 ({percentage:.1f}%)")
+    #         with col2:
+    #             st.markdown("**難易度別分布:**")
+    #             for difficulty, count in sorted(difficulty_stats.items()):
+    #                 percentage = (count / len(all_questions)) * 100
+    #                 difficulty_name = {"easy": "初級", "medium": "中級", "hard": "上級"}.get(difficulty, difficulty)
+    #                 st.markdown(f"- {difficulty_name}: {count}問 ({percentage:.1f}%)")
+    # except Exception as e:
+    #     st.error(f"統計情報の取得でエラーが発生しました: {e}")
 
 def render_demo_management():
     """デモモード用の問題管理表示"""
@@ -1146,19 +1164,15 @@ def render_delete_question_button(question, question_service):
 def render_edit_question_modal(question, question_service, choice_service):
     """強化された編集モーダル"""
     edit_modal_key = f"edit_modal_{question['id']}"
-    
     # 編集モーダルの表示
     st.session_state[edit_modal_key] = True
-    
     if st.session_state.get(edit_modal_key, False):
         with st.container():
             st.markdown("---")
             st.info("### ✏️ 問題の編集")
-            
             # 現在の問題情報をフォームで表示
             with st.form(f"edit_form_{question['id']}"):
                 st.markdown(f"**問題ID:** {question['id']}")
-                
                 # 編集可能フィールド
                 new_title = st.text_input("タイトル", value=question.get('title', ''))
                 new_content = st.text_area("問題文", value=question.get('content', ''), height=100)
@@ -1176,39 +1190,106 @@ def render_edit_question_modal(question, question_service, choice_service):
                 
                 # 選択肢の編集
                 st.markdown("**選択肢:**")
+                new_choices = []
+                correct_answers = []
+                
                 try:
                     choices = choice_service.get_choices_by_question_id(question['id'])
-                    new_choices = []
-                    
+                    # 既存の選択肢を表示・編集
                     for i, choice in enumerate(choices):
                         col1, col2 = st.columns([4, 1])
                         with col1:
                             choice_content = st.text_input(
-                                f"選択肢 {chr(65+i)}", 
-                                value=choice.content,
+                                f"選択肢 {chr(65+i)}",
+                                value=choice.content if choice.content else "",
                                 key=f"choice_{question['id']}_{i}"
                             )
                             new_choices.append(choice_content)
                         with col2:
                             is_correct = st.checkbox(
-                                "正答", 
+                                "正答",
                                 value=choice.is_correct,
                                 key=f"correct_{question['id']}_{i}"
                             )
+                            correct_answers.append(is_correct)
+                    
+                    # 不足している選択肢を追加（最低4つ）
+                    existing_count = len(choices)
+                    for i in range(existing_count, 4):
+                        col1, col2 = st.columns([4, 1])
+                        with col1:
+                            choice_content = st.text_input(
+                                f"選択肢 {chr(65+i)}",
+                                value="",
+                                key=f"choice_{question['id']}_{i}"
+                            )
+                            new_choices.append(choice_content)
+                        with col2:
+                            is_correct = st.checkbox(
+                                "正答",
+                                value=False,
+                                key=f"correct_{question['id']}_{i}"
+                            )
+                            correct_answers.append(is_correct)
                 
                 except Exception as e:
                     st.warning(f"選択肢の読み込みエラー: {e}")
-                    new_choices = ["", "", "", ""]
+                    # デフォルトの選択肢を作成
+                    for i in range(4):
+                        col1, col2 = st.columns([4, 1])
+                        with col1:
+                            choice_content = st.text_input(
+                                f"選択肢 {chr(65+i)}",
+                                value="",
+                                key=f"choice_{question['id']}_{i}"
+                            )
+                            new_choices.append(choice_content)
+                        with col2:
+                            is_correct = st.checkbox(
+                                "正答",
+                                value=False,
+                                key=f"correct_{question['id']}_{i}"
+                            )
+                            correct_answers.append(is_correct)
                 
                 # 保存・キャンセルボタン
-                col1, col2 = st.columns([1, 1])
-                
                 submitted = st.form_submit_button("💾 保存", type="primary")
                 cancelled = st.form_submit_button("❌ キャンセル")
                 
                 if submitted:
+                    st.write("🚀 保存ボタンが押されました")
+                    print(f"デバッグ: 保存処理開始 - 問題ID: {question['id']}")
+                    print(f"デバッグ: new_title='{new_title}'")
+                    print(f"デバッグ: new_content='{new_content}'")
+                    print(f"デバッグ: new_category='{new_category}'")
+                    print(f"デバッグ: new_difficulty='{new_difficulty}'")
+                    print(f"デバッグ: new_explanation='{new_explanation}'")
+                    print(f"デバッグ: new_choices={new_choices}")
+                    print(f"デバッグ: correct_answers={correct_answers}")
+                    
+                    correct_count = sum(correct_answers)
+                    st.write(f"正答チェック数: {correct_count}")
+                    
+                    # 最低限の入力チェック
+                    if not new_title.strip():
+                        st.error("問題タイトルを入力してください")
+                        st.stop()
+                    
+                    if not new_content.strip():
+                        st.error("問題内容を入力してください")
+                        st.stop()
+                    
+                    if correct_count != 1:
+                        st.error("正答は1つだけ選択してください")
+                        st.stop()
+                      # 空でない選択肢の数をチェック
+                    non_empty_choices = [choice for choice in new_choices if choice.strip()]
+                    if len(non_empty_choices) < 2:
+                        st.error("選択肢は最低2つ入力してください")
+                        st.stop()
+                    
                     try:
-                        # 問題情報の更新処理
+                        # 問題本体の更新
                         update_data = {
                             'title': new_title,
                             'content': new_content,
@@ -1216,22 +1297,240 @@ def render_edit_question_modal(question, question_service, choice_service):
                             'difficulty': new_difficulty,
                             'explanation': new_explanation
                         }
+                        print(f"🔄 問題更新データ: {update_data}")
+                        question_success = question_service.update_question(question['id'], update_data)
+                        print(f"問題更新結果: {question_success}")
                         
-                        # 実際の更新処理（QuestionServiceに更新メソッドが必要）
-                        # success = question_service.update_question(question['id'], update_data)
+                        if not question_success:
+                            st.error("問題の更新に失敗しました")
+                            print(f"❌ 問題ID {question['id']} の更新に失敗")
+                            st.stop()
                         
-                        # 現在は情報表示のみ
-                        st.success("✅ **編集内容:**")
-                        st.json(update_data)
-                        st.info("📝 **注意:** 編集機能は開発中です。現在は内容確認のみ可能です。")
+                        # 選択肢の更新処理を改善
+                        existing_choices = choice_service.get_choices_by_question_id(question['id'])
+                        choice_update_success = True
                         
-                        st.session_state[edit_modal_key] = False
+                        # 既存の選択肢を削除
+                        deletion_success = True
+                        for choice in existing_choices:
+                            if not choice_service.delete_choice(choice.id):
+                                deletion_success = False
+                                print(f"選択肢ID {choice.id} の削除に失敗しました")
+                        
+                        if not deletion_success:
+                            st.warning("一部の選択肢の削除に失敗しましたが、処理を続行します")
+                        
+                        # 全ての選択肢を最初から作り直す
+                        created_choices = []
+                        for i, choice_content in enumerate(new_choices):
+                            if choice_content.strip():  # 空でない場合のみ作成
+                                is_correct_for_choice = correct_answers[i] if i < len(correct_answers) else False
+                                try:
+                                    new_choice = choice_service.create_choice(
+                                        question_id=question['id'],
+                                        content=choice_content.strip(),
+                                        is_correct=is_correct_for_choice,
+                                        order_num=i + 1
+                                    )
+                                    if new_choice:
+                                        created_choices.append(new_choice)
+                                        print(f"✓ 選択肢作成成功: {new_choice.id} - {choice_content[:20]}")
+                                    else:
+                                        choice_update_success = False
+                                        print(f"✗ 選択肢作成失敗: {choice_content[:20]}")
+                                except Exception as ce:
+                                    choice_update_success = False
+                                    print(f"選択肢作成エラー: {ce}")
+                        
+                        # 少なくとも1つの選択肢が作成されたか確認
+                        if not created_choices:
+                            st.error("選択肢の作成に失敗しました")
+                            st.stop()
+                        
+                        # 保存成功処理
+                        if choice_update_success:
+                            st.success("✅ 問題と選択肢の更新が完了しました！")
+                            print(f"✅ 問題ID {question['id']} の編集が正常に完了しました")
+                            
+                            # 編集モーダルを閉じる前に成功フラグを設定
+                            st.session_state["edit_success"] = True
+                            st.session_state["edited_question_id"] = question['id']
+                            
+                            # キャッシュをクリア
+                            for key in list(st.session_state.keys()):
+                                if key.startswith('questions_cache_'):
+                                    del st.session_state[key]
+                            
+
+                            # 編集モーダルを閉じる
+                            st.session_state[edit_modal_key] = False
+                            
+
+                            # 確実にページを再読み込み
+                            time.sleep(0.5)  # 短い待機で状態変更を確実に
+                            st.experimental_rerun()  # 推奨される方法でリロード
+                        else:
+                            # 一部の選択肢が作成されたが全てではない場合
+                            if created_choices:
+                                st.warning(f"⚠️ {len(created_choices)}個の選択肢が作成されましたが、一部の選択肢の保存に失敗しました")
+                                st.info("部分的に保存された変更を確認してください")
+                                # 部分的な成功でもモーダルを閉じて再読み込み
+                                st.session_state[edit_modal_key] = False
+                                st.experimental_rerun()
+                            else:
+                                st.error("❌ 選択肢の保存に完全に失敗しました")
                         
                     except Exception as e:
                         st.error(f"編集エラー: {e}")
-                
+                        print(f"編集エラーの詳細: {e}")  # デバッグ用
                 if cancelled:
                     st.session_state[edit_modal_key] = False
                     st.rerun()
-            
             st.markdown("---")
+
+def render_verify_question_button(question, choices):
+    """問題検証ボタンの表示（モデル選択付き）"""
+    model_key = f"verification_model_{question['id']}"
+    model_options = [
+        "gpt-3.5-turbo",
+        "gpt-4",
+        "gpt-4o",
+        "gpt-4o-mini"
+    ]
+    # モデル選択UI
+    selected_model = st.selectbox(
+        "AIモデルを選択",
+        model_options,
+        key=model_key,
+        index=0,
+        help="検証に使用するOpenAIモデルを選択してください"
+    )
+
+    verification_in_progress_key = f"verification_in_progress_{question['id']}"
+    verification_in_progress = st.session_state.get(verification_in_progress_key, False)
+    
+    if st.button(
+        f"🔍 検証", 
+        key=f"verify_{question['id']}", 
+        disabled=verification_in_progress,
+        help="OpenAI APIで問題の品質・整合性を検証します"
+    ):
+        # 検証処理開始
+        st.session_state[verification_in_progress_key] = True
+        st.rerun()
+    
+    # 検証処理中の表示
+    if verification_in_progress:
+        with st.spinner("🔍 AI検証中..."):
+            try:
+                # OpenAI APIで検証
+                from services.enhanced_openai_service import EnhancedOpenAIService
+                # セッションからモデル取得（なければデフォルト）
+                model_name = st.session_state.get(model_key, "gpt-3.5-turbo")
+                openai_service = EnhancedOpenAIService(model=model_name)
+                
+                # 選択肢データを構築
+                choices_data = []
+                if choices:
+                    for i, choice in enumerate(choices):
+                        choices_data.append({
+                            'content': choice.content,
+                            'is_correct': choice.is_correct
+                        })
+                
+                # 検証実行
+                question_data = {
+                    'id': question['id'],
+                    'title': question['title'],
+                    'content': question['content'],
+                    'category': question.get('category', ''),
+                    'difficulty': question.get('difficulty', 'medium'),
+                    'explanation': question.get('explanation', '')
+                }
+                
+                # 検証を実行
+                verification_result = openai_service.verify_question_quality(
+                    question_data=question_data,
+                    choices_data=choices_data
+                )
+                
+                # 結果をセッション状態に保存
+                verification_key = f"verification_result_{question['id']}"
+                st.session_state[verification_key] = verification_result
+                
+                # 処理完了フラグをクリア
+                st.session_state[verification_in_progress_key] = False
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"検証中にエラーが発生しました: {e}")
+                print(f"検証エラー: {e}")
+                st.session_state[verification_in_progress_key] = False
+                st.rerun()
+
+def render_verification_result(verification_result):
+    """検証結果の表示"""
+    if not verification_result:
+        return
+    
+    # 結果に応じたスタイル設定
+    is_valid = verification_result.get('is_valid', None)
+    score = verification_result.get('score', 0)
+    issues = verification_result.get('issues', [])
+    recommendation = verification_result.get('recommendation', '不明')
+    details = verification_result.get('details', '')
+      # スコアとis_validに応じた表示
+    if is_valid is None:
+        st.error("🚨 **検証結果: エラー**")
+    elif score is None:
+        st.warning("⚠️ **検証結果: 判定不可**")
+    elif score >= 8:
+        st.success(f"✅ **検証結果: 優秀** (スコア: {score}/10)")
+    elif score >= 6:
+        st.info(f"👍 **検証結果: 良好** (スコア: {score}/10)")
+    elif score >= 4:
+        st.warning(f"⚠️ **検証結果: 要改善** (スコア: {score}/10)")
+    else:
+        st.error(f"❌ **検証結果: 不良** (スコア: {score}/10)")
+    
+    # 推奨アクション
+    if recommendation:
+        if recommendation == "削除推奨":
+            st.error(f"🗑️ **推奨アクション:** {recommendation}")
+        elif recommendation == "修正推奨":
+            st.warning(f"✏️ **推奨アクション:** {recommendation}")
+        elif recommendation == "問題なし":
+            st.success(f"✅ **推奨アクション:** {recommendation}")
+        else:
+            st.info(f"📋 **推奨アクション:** {recommendation}")
+    
+    # 問題点があれば表示
+    if issues:
+        with st.expander("⚠️ 検出された問題点", expanded=score < 6):
+            for issue in issues:
+                st.markdown(f"• {issue}")
+    
+    # 詳細説明があれば表示
+    if details and details != '詳細な評価結果が取得できませんでした':
+        with st.expander("📋 詳細分析", expanded=False):
+            st.markdown(details)
+    
+    # 結果をクリアするボタン
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col3:
+        # 問題IDを取得（セッション状態のキーから）
+        question_id = None
+        for key in st.session_state.keys():
+            if key.startswith("verification_result_") and st.session_state[key] == verification_result:
+                question_id = key.replace("verification_result_", "")
+                break
+        
+        if question_id and st.button("✖️ 結果を閉じる", key=f"close_verification_{question_id}"):
+            # セッション状態から削除
+            verification_key = f"verification_result_{question_id}"
+            if verification_key in st.session_state:
+                del st.session_state[verification_key]
+            st.rerun()
+            if verification_key in st.session_state:
+                del st.session_state[verification_key]
+            st.rerun()

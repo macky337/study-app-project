@@ -22,10 +22,10 @@ try:
     configure_page()
     # Streamlitナビゲーションを非表示
     hide_streamlit_navigation()
-    
-    # モデルの重複登録を防ぐため、アプリ起動時に一度クリア
+      # モデルの重複登録を防ぐため、アプリ起動時に一度だけ初期化
     if 'app_initialized' not in st.session_state:
         try:
+            # シングルトンパターンでモデル初期化
             ensure_models_loaded()
             st.session_state.app_initialized = True
             print("✅ App models initialized successfully")
@@ -88,40 +88,43 @@ def render_home_page():
         - 📊 学習履歴と統計の管理
         - 🔄 間違えた問題の復習
         - 🤖 AI による問題自動生成
-        - 📄 PDFからの問題抽出        """)          # データベース統計を表示
-        from config.app_config import check_database_connection
-        db_available, db_error = check_database_connection()
-        if db_available:
-            try:
-                # モデルを安全に読み込み
-                from config.app_config import ensure_models_loaded
-                ensure_models_loaded()
-                
-                from database.operations import QuestionService, UserAnswerService
-                from database.connection import get_session_context
-                
-                with get_session_context() as session:
-                    question_service = QuestionService(session)
-                    user_answer_service = UserAnswerService(session)
-                    
-                    # 基本統計を取得
-                    questions = question_service.get_random_questions(limit=1000)
-                    stats = user_answer_service.get_user_stats(st.session_state.session_id)
-                    
-                    st.markdown("### 📊 統計情報")
-                    col1_1, col1_2, col1_3 = st.columns(3)
-                    
-                    with col1_1:
-                        st.metric("総問題数", len(questions))
-                    with col1_2:
-                        st.metric("回答済み", stats.get('total', 0))
-                    with col1_3:
-                        st.metric("正答率", f"{stats.get('accuracy', 0)}%")
-                        
-            except Exception as e:
-                st.warning(f"統計情報の取得に失敗しました: {e}")
-        else:
-            st.warning("⚠️ データベースに接続できません（デモモードで動作中）")
+        - 📄 PDFからの問題抽出        """)        # 統計情報表示を一時的に無効化（エラー回避のため）
+        st.info("💡 統計情報は「📊 統計」ページで確認できます。")
+        
+        # # データベース統計を表示
+        # from config.app_config import check_database_connection
+        # db_available, db_error = check_database_connection()
+        # if db_available:
+        #     try:
+        #         # モデルを安全に読み込み
+        #         from config.app_config import ensure_models_loaded
+        #         ensure_models_loaded()
+        #         
+        #         from database.operations import QuestionService, UserAnswerService
+        #         from database.connection import get_session_context
+        #         
+        #         with get_session_context() as session:
+        #             question_service = QuestionService(session)
+        #             user_answer_service = UserAnswerService(session)
+        #             
+        #             # 基本統計を取得
+        #             questions = question_service.get_random_questions(limit=1000)
+        #             stats = user_answer_service.get_user_stats(st.session_state.session_id)
+        #             
+        #             st.markdown("### 📊 統計情報")
+        #             col1_1, col1_2, col1_3 = st.columns(3)
+        #             
+        #             with col1_1:
+        #                 st.metric("総問題数", len(questions))
+        #             with col1_2:
+        #                 st.metric("回答済み", stats.get('total', 0))
+        #             with col1_3:
+        #                 st.metric("正答率", f"{stats.get('accuracy', 0)}%")
+        #                 
+        #     except Exception as e:
+        #         st.warning(f"統計情報の取得に失敗しました: {e}")
+        # else:
+        #     st.warning("⚠️ データベースに接続できません（デモモードで動作中）")
     
     with col2:
         st.markdown("### 🚀 学習を開始")

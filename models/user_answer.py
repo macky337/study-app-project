@@ -1,14 +1,12 @@
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
-from sqlmodel import SQLModel, Field, Relationship
-
-if TYPE_CHECKING:
-    from models.question import Question
+from typing import Optional
+from sqlmodel import SQLModel, Field
 
 
 class UserAnswer(SQLModel, table=True):
     """ユーザー回答履歴テーブル"""
     __tablename__ = "user_answer"
+    __table_args__ = {"extend_existing": True}
     
     id: Optional[int] = Field(primary_key=True)
     question_id: int = Field(foreign_key="question.id")
@@ -19,8 +17,7 @@ class UserAnswer(SQLModel, table=True):
     
     # 学習セッション情報
     session_id: Optional[str] = None  # セッションID
-    user_id: Optional[str] = None  # 将来のユーザー管理用    # リレーション - 文字列参照で重複回避
-    question: Optional["Question"] = Relationship(back_populates="user_answers")
+    user_id: Optional[str] = None  # 将来のユーザー管理用
     
     class Config:
         from_attributes = True

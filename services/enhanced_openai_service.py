@@ -537,72 +537,195 @@ class EnhancedOpenAIService:
 
     @backoff.on_exception(
         backoff.expo,
-        (openai.RateLimitError, openai.APIConnectionError, openai.APITimeoutError),
-        max_tries=5,
-        max_time=60
+        (openai.RateLimitError, openai.APITimeoutError, openai.APIConnectionError),
+        max_tries=3,
+        factor=2
     )
-    def call_openai_api_with_retry(self, prompt, max_tokens=1000, temperature=0.7, system_message=None):
+    def verify_question_quality(self, question_data: dict, choices_data: list) -> dict:
         """
-        リトライ機能付きのOpenAI API呼び出し
+        問題の品質・整合性をOpenAI APIで検証
+        
+        Args:
+            question_data: 問題データ (id, title, content, explanation等)
+            choices_data: 選択肢データ (list of {content, is_correct})
+            
+        Returns:
+            dict: {
+                'is_valid': bool,      # 問題が有効かどうか
+                'score': int,          # 品質スコア (1-10)
+                'issues': list,        # 問題点のリスト
+                'recommendation': str, # 推奨アクション
+                'details': str         # 詳細な説明
+            }
         """
         try:
-            # タイムアウト設定付きクライアント作成
-            client = OpenAI(
-                api_key=self.api_key,
-                timeout=30  # 30秒でタイムアウト
+            print(f"🔍 問題検証開始: ID {question_data.get('id', 'unknown')}")
+            
+            # 選択肢情報の整理
+            choices_text = []
+            correct_choices = []
+            
+            for i, choice in enumerate(choices_data):
+                letter = chr(65 + i)  # A, B, C, D...
+                choices_text.append(f"{letter}. {choice['content']}")
+                if choice['is_correct']:
+                    correct_choices.append(f"{letter}")
+            
+            choices_str = "\n".join(choices_text)
+            correct_str = "、".join(correct_choices) if correct_choices else "なし"
+            
+            # 検証用プロンプト
+            verification_prompt = f"""
+あなたはクイズ問題の品質管理専門家です。以下の問題を客観的に評価してください。
+
+問題ID: {question_data.get('id', '不明')}
+タイトル: {question_data.get('title', '不明')}
+カテゴリ: {question_data.get('category', '不明')}
+難易度: {question_data.get('difficulty', '不明')}
+
+問題文:
+{question_data.get('content', '')}
+
+選択肢:
+{choices_str}
+
+正解: {correct_str}
+
+解説:
+{question_data.get('explanation', 'なし')}
+
+以下の観点で評価してください：
+1. 問題文が明確で理解しやすいか
+2. 選択肢が適切で重複がないか
+3. 正解が論理的に正しいか
+4. 正解が選択肢の中に含まれているか
+5. 解説が正解と一致しているか
+6. 全体として問題として成立しているか
+
+評価結果をJSON形式で返してください：
+{{
+    "is_valid": true/false,
+    "score": 1-10の整数,
+    "issues": ["問題点1", "問題点2", ...],
+    "recommendation": "削除推奨/修正推奨/問題なし",
+    "details": "詳細な説明"
+}}
+"""
+
+            # API呼び出し
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "あなたはクイズ問題の品質管理専門家です。問題を客観的に評価し、JSON形式で結果を返してください。"
+                    },
+                    {
+                        "role": "user", 
+                        "content": verification_prompt
+                    }
+                ],
+                temperature=0.1,  # 一貫性のため低温度
+                max_tokens=1000
             )
             
-            messages = []
-            if system_message:
-                messages.append({"role": "system", "content": system_message})
-            messages.append({"role": "user", "content": prompt})
+            result_text = response.choices[0].message.content.strip()
+            print(f"📝 検証結果取得: {len(result_text)} 文字")
             
-            print(f"INFO: OpenAI API呼び出し開始 (モデル: {self.model_name})")
-            start_time = time.time()
-            
-            response = client.chat.completions.create(
-                model=self.model_name,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature
-            )
-            
-            elapsed_time = time.time() - start_time
-            print(f"OK: API呼び出し成功 ({elapsed_time:.2f}秒)")
-            
-            return response.choices[0].message.content
-            
+            # JSON形式の結果をパース
+            try:
+                # JSON部分を抽出（```json ブロックがある場合）
+                if "```json" in result_text:
+                    json_start = result_text.find("```json") + 7
+                    json_end = result_text.find("```", json_start)
+                    result_text = result_text[json_start:json_end].strip()
+                elif "```" in result_text:
+                    json_start = result_text.find("```") + 3
+                    json_end = result_text.rfind("```")
+                    result_text = result_text[json_start:json_end].strip()
+                
+                result = json.loads(result_text)
+                
+                # 結果の検証と補完
+                if not isinstance(result, dict):
+                    raise ValueError("結果がdict形式ではありません")
+                
+                # 必須フィールドの確認と補完
+                result.setdefault('is_valid', True)
+                result.setdefault('score', 5)
+                result.setdefault('issues', [])
+                result.setdefault('recommendation', '判定不明')
+                result.setdefault('details', '詳細な評価結果が取得できませんでした')
+                
+                # スコアの正規化
+                if not isinstance(result['score'], int) or result['score'] < 1 or result['score'] > 10:
+                    result['score'] = 5
+                
+                print(f"✅ 検証完了: スコア {result['score']}/10, 有効性: {result['is_valid']}")
+                return result
+                
+            except json.JSONDecodeError as e:
+                print(f"⚠️ JSON解析エラー: {e}")
+                # フォールバック: テキスト解析
+                return self._parse_verification_fallback(result_text)
+                
         except openai.RateLimitError as e:
-            print(f"WARN: レート制限エラー、リトライします: {e}")
-            raise
-        except openai.APIConnectionError as e:
-            print(f"WARN: 接続エラー、リトライします: {e}")
-            raise
-        except openai.APITimeoutError as e:
-            print(f"WARN: タイムアウトエラー、リトライします: {e}")
-            raise
+            print(f"⚠️ Rate limit error in verification: {e}")
+            return {
+                'is_valid': None,
+                'score': None,
+                'issues': ['API利用制限に達しました'],
+                'recommendation': '後で再試行',
+                'details': 'OpenAI APIの利用制限により検証できませんでした。しばらく待ってから再試行してください。'
+            }
         except Exception as e:
-            print(f"ERROR: 予期しないエラー: {e}")
-            raise
+            print(f"❌ Verification error: {e}")
+            return {
+                'is_valid': None,
+                'score': None,
+                'issues': [f'検証エラー: {str(e)}'],
+                'recommendation': '手動確認推奨',
+                'details': f'問題の検証中にエラーが発生しました: {str(e)}'
+            }
+    
+    def _parse_verification_fallback(self, text: str) -> dict:
+        """JSON解析に失敗した場合のフォールバック解析"""
+        try:
+            # テキストから情報を抽出
+            is_valid = 'false' not in text.lower() and '削除' not in text
+            
+            # スコアを抽出
+            score = 5
+            for line in text.split('\n'):
+                if 'score' in line.lower() or 'スコア' in line:
+                    import re
+                    numbers = re.findall(r'\d+', line)
+                    if numbers:
+                        score = min(10, max(1, int(numbers[0])))
+                        break
+            
+            # 問題点を抽出
+            issues = []
+            if '問題' in text or 'エラー' in text:
+                issues.append('品質に問題がある可能性があります')
+            
+            return {
+                'is_valid': is_valid,
+                'score': score,
+                'issues': issues,
+                'recommendation': '削除推奨' if not is_valid else '要確認',
+                'details': text[:200] + '...' if len(text) > 200 else text
+            }
+        except:
+            return {
+                'is_valid': None,
+                'score': None,
+                'issues': ['解析エラー'],
+                'recommendation': '手動確認推奨',
+                'details': '検証結果の解析に失敗しました'
+            }
 
-    def generate_completion(
-        self,
-        prompt: str,
-        max_tokens: int = 1500,
-        temperature: float = 0.7,
-        system_message: str = "あなたは資格試験問題作成の専門家です。正確で教育的な問題を作成してください。"
-    ) -> Optional[str]:
-        """
-        PDF問題生成などで使用される汎用的な補完メソッド
-        call_openai_apiのラッパー
-        """
-        return self.call_openai_api(
-            prompt=prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            system_message=system_message
-        )
-
+    # ...existing code...
 def test_enhanced_openai_service():
     """Test the enhanced OpenAI service"""
     try:
