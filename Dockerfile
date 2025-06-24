@@ -17,5 +17,5 @@ COPY . .
 # Streamlitのポート開放 (固定ポート8000)
 EXPOSE 8000
 
-# アプリ起動コマンド - 専用ラッパーでStreamlitを完全制御
-CMD ["python", "streamlit_wrapper.py"]
+# アプリ起動コマンド - Flask版で確実に動作させる
+CMD ["python", "flask_app.py"]
