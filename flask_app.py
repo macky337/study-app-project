@@ -2,6 +2,11 @@
 Railway対応: Flask版Study Quiz App
 Streamlitの代替として一時的に使用
 """
+print("=" * 80)
+print("FLASK APP STARTING - NOT STREAMLIT!")
+print("If you see Streamlit errors, Railway is ignoring the Dockerfile")
+print("=" * 80)
+
 from flask import Flask, render_template_string, request, redirect, url_for, session
 import os
 import sys
