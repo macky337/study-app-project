@@ -1,4 +1,4 @@
-# ベースイメージ
+# ベースイメージ (Railway用に修正済み)
 FROM python:3.11-slim
 
 # PostgreSQLクライアントツールをインストール
@@ -14,8 +14,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # アプリ本体コピー
 COPY . .
 
-# Streamlitのポートを開放
+# Streamlitのポート開放 (固定ポート8000)
 EXPOSE 8000
 
-# アプリ起動コマンド
+# アプリ起動コマンド (Railway対応: 固定ポート使用)
 CMD ["streamlit", "run", "app.py", "--server.port=8000", "--server.address=0.0.0.0"]
