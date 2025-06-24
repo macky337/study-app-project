@@ -5,9 +5,12 @@ Study Quiz App - メインアプリケーション
 """
 import os
 
-# Railway対応: ポート8080での動作を確認済み
-print(f"[RAILWAY_SUCCESS] App starting on port {os.environ.get('PORT', '8080')}")
-print("[RAILWAY_SUCCESS] Railway configuration fixed!")
+# Railway対応: 問題のある環境変数を起動時に削除
+problematic_vars = ['PORT', 'STREAMLIT_SERVER_PORT']
+for var in problematic_vars:
+    if var in os.environ:
+        print(f"[RAILWAY_FIX] Removing {var}={os.environ[var]}")
+        del os.environ[var]
 
 import streamlit as st
 import logging

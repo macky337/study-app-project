@@ -1,4 +1,4 @@
-# ベースイメージ (Railway用 - 設定ファイル依存版)
+# Study Quiz App - Railway対応版
 FROM python:3.11-slim
 
 # PostgreSQLクライアントツールをインストール
@@ -14,8 +14,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # アプリ本体コピー
 COPY . .
 
-# Streamlitのポート開放 (固定ポート8000)
-EXPOSE 8000
+# Streamlitのポート開放
+EXPOSE 8080
 
-# アプリ起動コマンド - Pythonランチャー使用で環境変数を完全制御
-CMD ["python", "launcher.py"]
+# Streamlitアプリ起動
+CMD ["streamlit", "run", "app.py", "--server.port=8080", "--server.address=0.0.0.0"]
