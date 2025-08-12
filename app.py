@@ -5,12 +5,17 @@ Study Quiz App - メインアプリケーション
 """
 import os
 
-# Railway対応: 問題のある環境変数を起動時に削除
-problematic_vars = ['PORT', 'STREAMLIT_SERVER_PORT']
-for var in problematic_vars:
-    if var in os.environ:
-        print(f"[RAILWAY_FIX] Removing {var}={os.environ[var]}")
-        del os.environ[var]
+# Railway対応: Streamlit用の環境変数設定
+if 'RAILWAY_ENVIRONMENT' in os.environ or 'PORT' in os.environ:
+    # Railway環境では環境変数を保持
+    print(f"[RAILWAY] Running in Railway environment. PORT={os.environ.get('PORT', 'not set')}")
+else:
+    # ローカル環境でのみ問題のある環境変数を削除
+    problematic_vars = ['STREAMLIT_SERVER_PORT']
+    for var in problematic_vars:
+        if var in os.environ:
+            print(f"[LOCAL] Removing {var}={os.environ[var]}")
+            del os.environ[var]
 
 import streamlit as st
 import logging

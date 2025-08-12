@@ -57,6 +57,11 @@ class AudioService:
         
         self.client = OpenAI(api_key=self.api_key)
         
+        # Railway環境でのメモリ制限を考慮してファイルサイズを調整
+        if os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('PORT'):
+            self.MAX_FILE_SIZE = 20 * 1024 * 1024  # Railway環境では20MBに制限
+            logger.info("Railway environment detected: File size limit set to 20MB")
+        
         # 音声分割ツールの初期化
         if SPLITTER_AVAILABLE and AudioSplitter is not None:
             self.splitter = AudioSplitter()

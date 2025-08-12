@@ -3,12 +3,38 @@
 """
 import streamlit as st
 import logging
+import os
 
 # ロギング設定
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # グローバル変数
 _models_loaded = False
+
+def is_railway_environment():
+    """Railway環境で実行されているかを判定"""
+    return 'RAILWAY_ENVIRONMENT' in os.environ or 'RAILWAY_PROJECT_ID' in os.environ
+
+def is_production_environment():
+    """本番環境で実行されているかを判定"""
+    return is_railway_environment() or os.environ.get('STREAMLIT_ENV') == 'production'
+
+def get_server_config():
+    """環境に応じたサーバー設定を取得"""
+    if is_railway_environment():
+        return {
+            'port': int(os.environ.get('PORT', 8080)),
+            'address': '0.0.0.0',
+            'headless': True,
+            'cors': True
+        }
+    else:
+        return {
+            'port': 8501,
+            'address': 'localhost',
+            'headless': False,
+            'cors': False
+        }
 
 # アプリケーションのページリスト
 PAGES = [

@@ -1,17 +1,16 @@
 [server]
-# ローカル開発用設定
-headless = false
-enableCORS = false
+# Railway対応設定
+headless = true
+enableCORS = true
 enableXsrfProtection = false
-port = 8501
-address = "localhost"
-runOnSave = true
-allowRunOnSave = true
+port = 8080
+address = "0.0.0.0"
+runOnSave = false
+allowRunOnSave = false
+maxUploadSize = 200
 
 [browser]
 gatherUsageStats = false
-serverAddress = "localhost"
-serverPort = 8501
 
 [theme]
 # テーマ設定

@@ -1,8 +1,11 @@
 # Study Quiz App - Railway対応版
 FROM python:3.11-slim
 
-# PostgreSQLクライアントツールをインストール
-RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/apt/lists/*
+# PostgreSQLクライアントとffmpegをインストール
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 # 作業ディレクトリ作成
 WORKDIR /app
@@ -14,8 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # アプリ本体コピー
 COPY . .
 
-# Streamlitのポート開放
-EXPOSE 8080
+# ポート設定（Railway環境では$PORTが自動設定される）
+EXPOSE $PORT
 
-# Streamlitアプリ起動
-CMD ["streamlit", "run", "app.py", "--server.port=8080", "--server.address=0.0.0.0"]
+# Streamlitアプリ起動（Railway環境対応）
+CMD streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true

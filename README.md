@@ -181,17 +181,26 @@ start_app.bat
 
 ## 🌐 デプロイメント
 
-### Railway デプロイ
+### Railway デプロイ（推奨）
 1. [Railway](https://railway.app) アカウント作成
 2. PostgreSQL データベース作成
-3. 環境変数設定
+3. 環境変数設定（必須）：
+   ```
+   OPENAI_API_KEY=your_api_key
+   DATABASE_URL=your_postgres_url
+   ```
 4. リポジトリ接続・自動デプロイ
+
+**⚠️ 重要な注意事項:**
+- Railway環境では音声ファイルサイズが20MBに制限されます
+- ffmpegは自動インストールされるため、大容量ファイル分割が利用可能です
+- メモリ制限により、同時処理数に制限があります
 
 詳細手順: [`RAILWAY_HOBBY_GUIDE.md`](RAILWAY_HOBBY_GUIDE.md)
 
 ### その他のプラットフォーム
 - **Heroku:** `Procfile` 対応済み
-- **Docker:** コンテナ化可能
+- **Docker:** コンテナ化可能（ffmpeg含む）
 - **VPS:** 手動デプロイ対応
 
 ---

@@ -1,0 +1,14 @@
+[variables]
+PYTHONPATH = "/app"
+
+[phases.setup]
+nixPkgs = ["python311", "postgresql", "ffmpeg"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[phases.build]
+cmds = ["echo 'Build phase completed'"]
+
+[start]
+cmd = "streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true"
