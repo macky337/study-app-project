@@ -26,6 +26,7 @@ try:
     from app_pages.statistics_page import render_statistics_page
     from app_pages.question_management_page import render_question_management_page
     from app_pages.settings_page import render_settings_page
+    from app_pages.audio_transcription_page import render_audio_transcription_page
     
     # ページ設定（最初に実行する必要がある）
     configure_page()
@@ -36,6 +37,19 @@ try:
         try:
             # シングルトンパターンでモデル初期化
             ensure_models_loaded()
+            
+            # TranscriptionSegmentシリアライゼーション問題の修正
+            # 既存の問題のあるセッション状態をクリア
+            if 'transcription_result' in st.session_state:
+                try:
+                    # JSONシリアライズテスト
+                    import json
+                    json.dumps(st.session_state.transcription_result)
+                except (TypeError, ValueError):
+                    # シリアライズできない場合はクリア
+                    del st.session_state.transcription_result
+                    print("⚠️ Cleared non-serializable transcription_result from session state")
+            
             st.session_state.app_initialized = True
             print("✅ App models initialized successfully")
         except Exception as model_error:
@@ -97,7 +111,8 @@ def render_home_page():
         - 📊 学習履歴と統計の管理
         - 🔄 間違えた問題の復習
         - 🤖 AI による問題自動生成
-        - 📄 PDFからの問題抽出        """)        # 統計情報表示を一時的に無効化（エラー回避のため）
+        - 📄 PDFからの問題抽出
+        - 🎤 音声文字起こし・議事録作成        """)        # 統計情報表示を一時的に無効化（エラー回避のため）
         st.info("💡 統計情報は「📊 統計」ページで確認できます。")
         
         # # データベース統計を表示
@@ -178,6 +193,8 @@ try:
         render_statistics_page()
     elif current_page == "🔧 問題管理":
         render_question_management_page()
+    elif current_page == "🎤 音声・議事録":
+        render_audio_transcription_page()
     elif current_page == "⚙️ 設定":
         render_settings_page()
     else:
