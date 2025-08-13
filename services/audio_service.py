@@ -49,6 +49,212 @@ class AudioService:
     # 最大ファイルサイズ（25MB - OpenAI Whisperの制限）
     MAX_FILE_SIZE = 25 * 1024 * 1024
     
+    # 議事録作成用プロンプトテンプレート
+    PROMPT_TEMPLATES = {
+        "standard": {
+            "name": "標準議事録",
+            "description": "一般的なビジネス会議に適した形式",
+            "prompt": """以下は、会議または打ち合わせの文字起こしデータです。
+この内容を基に、わかりやすく整理された議事録を作成してください。
+
+【要件】
+1. 冒頭に「会議概要」として日付・場所・参加者を記載（わかる範囲で）。
+2. 「決定事項」と「未決事項」に分けて箇条書きで明記。
+3. 決定事項は、具体的な日時・場所・金額・担当者などを可能な限り詳細に。
+4. 「議論内容」では、重要なやり取りの経緯や背景説明を時系列で簡潔にまとめる。
+5. 必要に応じて「次回までの宿題」「補足事項」も追加。
+6. 無関係な雑談や重複は削除し、重要情報を残す。
+7. 全体を読みやすい段落・箇条書き形式で整える。
+
+【出力形式例】
+
+---
+# 議事録
+
+**会議概要**  
+- 日時：YYYY年MM月DD日  
+- 場所：〇〇  
+- 参加者：〇〇
+
+**決定事項**  
+- ○月○日 18:00 通夜開始（会場：〇〇）  
+- ○月○日 14:30 火葬（場所：〇〇火葬場）  
+- 遺体は低温庫保管、ドライアイス不使用  
+- 式後の食事は4名分お持ち帰り弁当（業者：〇〇）
+
+**未決事項**  
+- 会葬返礼品の有無  
+- 〇〇の搬送ルート確定
+
+**議論内容**  
+1. 式の日程と読経のタイミングについて議論し、住職の都合で12日に読経実施案が有力とされた。  
+2. 遺体保管方法として低温庫利用を決定。ドライアイスは肌変色のリスクから使用しない方針。  
+3. 祭壇は白木に洋花を配置し、棺内にも花を入れる案が採用された。  
+4. …（続く）
+
+**次回までの宿題**  
+- 搬送ルートを運転担当と再確認  
+- 香典返し対応の可否を確定
+
+---
+
+**重要: 必ずJSON形式で出力してください。**
+
+【文字起こしデータ】
+{transcription_text}"""
+        },
+        "simple": {
+            "name": "シンプル議事録",
+            "description": "要点のみを簡潔にまとめた形式",
+            "prompt": """以下の会議文字起こしデータから、要点のみを簡潔にまとめた議事録を作成してください。
+
+【要件】
+- 決定事項と次のアクションを明確に
+- 不要な詳細は省略
+- 読みやすい箇条書き形式
+
+【出力形式】
+## 議事録
+
+### 決定事項
+- 項目1
+- 項目2
+
+### アクションアイテム
+- [ ] タスク1 (担当者、期限)
+- [ ] タスク2 (担当者、期限)
+
+### その他
+- 補足事項
+
+**重要: 必ずJSON形式で出力してください。**
+
+【文字起こしデータ】
+{transcription_text}"""
+        },
+        "detailed": {
+            "name": "詳細議事録",
+            "description": "詳細な議論内容を含む包括的な形式",
+            "prompt": """以下の会議文字起こしデータから、詳細で包括的な議事録を作成してください。
+
+【要件】
+1. 会議の背景と目的を明記
+2. 参加者の発言を時系列で整理
+3. 議論のプロセスと根拠を詳細に記録
+4. 決定に至った経緯を明確に
+5. リスクや懸念事項も含める
+6. フォローアップ計画を具体的に
+
+【出力形式】
+# 議事録
+
+## 1. 会議概要
+- 日時：
+- 参加者：
+- 目的：
+
+## 2. 議論詳細
+### 2.1 議題1
+- 背景：
+- 主な議論：
+- 懸念事項：
+
+### 2.2 議題2
+...
+
+## 3. 決定事項
+1. 決定内容（根拠、影響範囲を含む）
+2. ...
+
+## 4. アクションプラン
+| タスク | 担当者 | 期限 | 優先度 |
+|--------|--------|------|--------|
+| | | | |
+
+## 5. 次回会議
+- 日程：
+- 議題：
+
+**重要: 必ずJSON形式で出力してください。**
+
+【文字起こしデータ】
+{transcription_text}"""
+        },
+        "agile": {
+            "name": "アジャイル・スタンドアップ",
+            "description": "アジャイル開発のスタンドアップ会議向け",
+            "prompt": """以下のスタンドアップ会議の文字起こしデータから、アジャイル形式の議事録を作成してください。
+
+【要件】
+- 各メンバーの進捗を整理
+- ブロッカーと課題を明確に
+- 次のスプリントへのアクション
+
+【出力形式】
+# スタンドアップ議事録
+
+## 日時・参加者
+- 日時：
+- 参加者：
+
+## メンバー別進捗
+
+### [メンバー名1]
+- **昨日完了したこと：**
+- **今日する予定：**
+- **ブロッカー・課題：**
+
+### [メンバー名2]
+...
+
+## チーム全体
+- **スプリント進捗：**
+- **リスク・課題：**
+- **次のアクション：**
+
+**重要: 必ずJSON形式で出力してください。**
+
+【文字起こしデータ】
+{transcription_text}"""
+        }
+    }
+    
+    # 利用可能なGPTモデル（議事録生成用）
+    AVAILABLE_MODELS = {
+        "gpt-4o-mini": {
+            "name": "GPT-4o Mini",
+            "description": "高速・低コスト（推奨）",
+            "input_cost_per_1m": 0.15,  # USD per 1M tokens
+            "output_cost_per_1m": 0.6,
+            "max_tokens": 128000,
+            "recommended_for": "一般的な議事録作成"
+        },
+        "gpt-4o": {
+            "name": "GPT-4o",
+            "description": "高品質・中コスト",
+            "input_cost_per_1m": 2.50,
+            "output_cost_per_1m": 10.0,
+            "max_tokens": 128000,
+            "recommended_for": "重要な会議・詳細な分析"
+        },
+        "gpt-4-turbo": {
+            "name": "GPT-4 Turbo", 
+            "description": "バランス型",
+            "input_cost_per_1m": 10.0,
+            "output_cost_per_1m": 30.0,
+            "max_tokens": 128000,
+            "recommended_for": "複雑な議事録作成"
+        },
+        "gpt-3.5-turbo": {
+            "name": "GPT-3.5 Turbo",
+            "description": "最低コスト",
+            "input_cost_per_1m": 0.50,
+            "output_cost_per_1m": 1.50,
+            "max_tokens": 16385,
+            "recommended_for": "シンプルな議事録"
+        }
+    }
+    
     def __init__(self):
         """サービスの初期化"""
         self.api_key = os.getenv("OPENAI_API_KEY")
@@ -429,22 +635,69 @@ class AudioService:
         self, 
         transcribed_text: str,
         meeting_title: str = "",
-        participants: Optional[List[str]] = None
+        participants: Optional[List[str]] = None,
+        model: str = "gpt-4o-mini",
+        custom_prompt: Optional[str] = None,
+        prompt_template: str = "standard"
     ) -> Dict[str, Any]:
-        """文字起こしテキストから議事録を生成"""
+        """文字起こしテキストから議事録を生成
+        
+        Args:
+            transcribed_text: 文字起こしされたテキスト
+            meeting_title: 会議タイトル
+            participants: 参加者リスト
+            model: 使用するGPTモデル（デフォルト: gpt-4o-mini）
+            custom_prompt: カスタムプロンプト（指定時はこれを優先）
+            prompt_template: プロンプトテンプレート名（デフォルト: standard）
+        """
         try:
-            logger.info("Creating meeting minutes from transcribed text")
+            # 入力テキストの検証
+            if not transcribed_text or transcribed_text.strip() == "":
+                return {
+                    "success": False,
+                    "error": "文字起こしテキストが空です。"
+                }
             
-            # 議事録生成用のプロンプト
-            prompt = self._create_minutes_prompt(transcribed_text, meeting_title, participants)
+            # モデルの検証
+            if model not in self.AVAILABLE_MODELS:
+                logger.warning(f"Unknown model {model}, falling back to gpt-4o-mini")
+                model = "gpt-4o-mini"
+            
+            logger.info(f"Creating meeting minutes using model: {model}")
+            
+            # プロンプトの決定（カスタムプロンプト優先）
+            if custom_prompt and custom_prompt.strip():
+                # カスタムプロンプトを使用
+                try:
+                    prompt = custom_prompt.format(transcription_text=transcribed_text)
+                    logger.info("Using custom prompt for meeting minutes")
+                except KeyError as e:
+                    logger.warning(f"Custom prompt format error: {e}")
+                    # フォールバック処理
+                    prompt = custom_prompt + f"\n\n【文字起こしデータ】\n{transcribed_text}"
+            else:
+                # テンプレートプロンプトを使用
+                if prompt_template in self.PROMPT_TEMPLATES:
+                    template = self.PROMPT_TEMPLATES[prompt_template]
+                    try:
+                        prompt = template["prompt"].format(transcription_text=transcribed_text)
+                        logger.info(f"Using template prompt: {template['name']}")
+                    except KeyError as e:
+                        logger.warning(f"Template prompt format error: {e}")
+                        # フォールバック処理
+                        prompt = template["prompt"] + f"\n\n【文字起こしデータ】\n{transcribed_text}"
+                else:
+                    # フォールバック: 従来のプロンプト
+                    prompt = self._create_minutes_prompt(transcribed_text, meeting_title, participants)
+                    logger.info("Using legacy prompt format")
             
             # OpenAI APIで議事録を生成
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=model,
                 messages=[
                     {
                         "role": "system", 
-                        "content": "あなたは会議の議事録作成の専門家です。音声から文字起こしされたテキストを基に、整理された議事録を作成してください。"
+                        "content": "あなたは会議の議事録作成の専門家です。音声から文字起こしされたテキストを基に、整理された議事録をJSON形式で作成してください。"
                     },
                     {
                         "role": "user",
@@ -462,6 +715,33 @@ class AudioService:
             
             logger.info("プライバシー保護: OpenAI学習無効化ヘッダー送信完了 (議事録生成)")
             
+            # 使用量とコストの計算
+            usage = response.usage
+            model_info = self.AVAILABLE_MODELS[model]
+            
+            if usage:
+                input_cost = (usage.prompt_tokens / 1_000_000) * model_info["input_cost_per_1m"]
+                output_cost = (usage.completion_tokens / 1_000_000) * model_info["output_cost_per_1m"]
+                total_cost = input_cost + output_cost
+                
+                cost_info = {
+                    "model_used": model,
+                    "input_tokens": usage.prompt_tokens,
+                    "output_tokens": usage.completion_tokens,
+                    "total_tokens": usage.total_tokens,
+                    "estimated_cost_usd": round(total_cost, 4),
+                    "cost_breakdown": {
+                        "input_cost": round(input_cost, 4),
+                        "output_cost": round(output_cost, 4)
+                    }
+                }
+                logger.info(f"Cost info: ${total_cost:.4f} USD ({usage.total_tokens} tokens)")
+            else:
+                cost_info = {
+                    "model_used": model,
+                    "estimated_cost_usd": "unavailable"
+                }
+            
             # レスポンスをJSONとしてパース
             content = response.choices[0].message.content
             if content is None:
@@ -471,7 +751,8 @@ class AudioService:
             
             return {
                 "success": True,
-                "minutes": minutes_data
+                "minutes": minutes_data,
+                "cost_info": cost_info
             }
             
         except Exception as e:
@@ -544,6 +825,79 @@ def test_audio_service():
     except Exception as e:
         print(f"❌ AudioService initialization failed: {e}")
         return False
+
+    @classmethod
+    def estimate_cost(cls, text_length: int, model: str = "gpt-4o-mini") -> Dict[str, Any]:
+        """テキスト長に基づいてコストを概算
+        
+        Args:
+            text_length: 入力テキストの文字数
+            model: 使用予定のモデル
+            
+        Returns:
+            コスト概算情報
+        """
+        if model not in cls.AVAILABLE_MODELS:
+            model = "gpt-4o-mini"
+        
+        model_info = cls.AVAILABLE_MODELS[model]
+        
+        # 概算トークン数 (日本語は約2.5文字=1トークン、英語は約4文字=1トークン)
+        estimated_input_tokens = int(text_length / 2.5)  # 日本語メインと仮定
+        estimated_output_tokens = 1000  # 議事録出力の平均的なトークン数
+        
+        input_cost = (estimated_input_tokens / 1_000_000) * model_info["input_cost_per_1m"]
+        output_cost = (estimated_output_tokens / 1_000_000) * model_info["output_cost_per_1m"]
+        total_cost = input_cost + output_cost
+        
+        return {
+            "model": model,
+            "model_name": model_info["name"],
+            "estimated_input_tokens": estimated_input_tokens,
+            "estimated_output_tokens": estimated_output_tokens,
+            "estimated_total_tokens": estimated_input_tokens + estimated_output_tokens,
+            "estimated_cost_usd": round(total_cost, 4),
+            "cost_breakdown": {
+                "input_cost": round(input_cost, 4),
+                "output_cost": round(output_cost, 4)
+            },
+            "text_length": text_length
+        }
+
+    @classmethod
+    def get_model_info(cls, model: str = None) -> Dict[str, Any]:
+        """モデル情報を取得
+        
+        Args:
+            model: 特定のモデル名（Noneの場合は全モデル情報）
+            
+        Returns:
+            モデル情報
+        """
+        if model:
+            return cls.AVAILABLE_MODELS.get(model, {})
+        return cls.AVAILABLE_MODELS
+
+    @classmethod
+    def get_prompt_templates(cls) -> Dict[str, Dict[str, str]]:
+        """プロンプトテンプレート情報を取得
+        
+        Returns:
+            プロンプトテンプレート情報
+        """
+        return cls.PROMPT_TEMPLATES
+
+    @classmethod
+    def get_prompt_template(cls, template_name: str) -> Optional[Dict[str, str]]:
+        """特定のプロンプトテンプレートを取得
+        
+        Args:
+            template_name: テンプレート名
+            
+        Returns:
+            プロンプトテンプレート情報
+        """
+        return cls.PROMPT_TEMPLATES.get(template_name)
 
 if __name__ == "__main__":
     test_audio_service()

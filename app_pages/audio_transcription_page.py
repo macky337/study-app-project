@@ -345,7 +345,7 @@ def render_audio_upload_section():
                         preview_text = result["text"][:500]
                         if len(result["text"]) > 500:
                             preview_text += "..."
-                        st.text_area("", preview_text, height=150, disabled=True)
+                        st.text_area("プレビュー", preview_text, height=150, disabled=True, key="audio_upload_preview", label_visibility="collapsed")
                         
                         st.info("詳細は「文字起こし結果」タブで確認できます")
                     else:
@@ -414,12 +414,75 @@ def render_transcription_result_section():
     
     # 文字起こしテキスト表示
     st.subheader("📄 文字起こしテキスト")
-    st.text_area(
-        "",
-        result["text"],
-        height=400,
-        help="このテキストをコピーして他のアプリケーションで使用できます"
-    )
+    
+    # 編集モードの選択
+    edit_mode = st.checkbox("✏️ テキストを編集する", help="チェックを入れると文字起こし結果を編集できます")
+    
+    if edit_mode:
+        # 編集可能なテキストエリア
+        st.info("💡 テキストを編集してください。編集後は必ず「保存」ボタンを押してください。")
+        edited_text = st.text_area(
+            "編集中のテキスト",
+            value=result["text"],
+            height=400,
+            help="文字起こし結果を編集できます。編集後は保存ボタンを押してください。",
+            key="editable_transcription_text"
+        )
+        
+        # 保存とリセットボタン
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            if st.button("💾 編集を保存", type="primary"):
+                # セッション状態の文字起こし結果を更新
+                if edited_text is not None:
+                    st.session_state.transcription_result["text"] = edited_text
+                    st.session_state.transcription_result["edited"] = True
+                    st.success("✅ 編集が保存されました！")
+                    st.rerun()
+                else:
+                    st.error("テキストが空です")
+        
+        with col2:
+            if st.button("🔄 元に戻す"):
+                # 元のテキストに戻す（編集フラグがあれば削除）
+                if hasattr(st.session_state, 'original_transcription_text'):
+                    st.session_state.transcription_result["text"] = st.session_state.original_transcription_text
+                    if "edited" in st.session_state.transcription_result:
+                        del st.session_state.transcription_result["edited"]
+                    st.success("✅ 元のテキストに戻しました！")
+                    st.rerun()
+                else:
+                    st.warning("元のテキストが見つかりません")
+        
+        # 文字数の比較表示
+        original_length = len(result["text"])
+        edited_length = len(edited_text) if edited_text else 0
+        if edited_length != original_length:
+            with col3:
+                st.metric(
+                    "文字数の変化", 
+                    f"{edited_length:,}", 
+                    delta=f"{edited_length - original_length:+,}"
+                )
+    else:
+        # 元のテキストを保存（編集後に戻せるように）
+        if 'original_transcription_text' not in st.session_state:
+            st.session_state.original_transcription_text = result["text"]
+        
+        # 読み取り専用表示
+        st.text_area(
+            "文字起こしテキスト",
+            result["text"],
+            height=400,
+            help="このテキストをコピーして他のアプリケーションで使用できます",
+            key="transcription_result_readonly",
+            disabled=True,
+            label_visibility="collapsed"
+        )
+        
+        # 編集状況の表示
+        if result.get("edited", False):
+            st.info("ℹ️ このテキストは編集されています。元に戻すには編集モードを有効にしてください。")
     
     # ダウンロードボタン
     col1, col2 = st.columns(2)
@@ -490,11 +553,242 @@ def render_meeting_minutes_section():
     """議事録作成セクション"""
     st.header("議事録作成")
     
-    if st.session_state.transcription_result is None:
-        st.info("まず音声ファイルをアップロードして文字起こしを行ってください")
-        return
+    # 入力方法選択
+    st.subheader("📥 入力方法選択")
+    input_method = st.radio(
+        "議事録作成の入力方法を選択してください",
+        ["音声文字起こし結果を使用", "テキストファイルをアップロード", "直接テキスト入力"],
+        horizontal=True
+    )
     
-    transcription_text = st.session_state.transcription_result["text"]
+    transcription_text = ""
+    
+    # 入力方法に応じた処理
+    if input_method == "音声文字起こし結果を使用":
+        if st.session_state.transcription_result is None:
+            st.info("まず音声ファイルをアップロードして文字起こしを行ってください")
+            return
+        
+        # 編集状況の表示
+        if st.session_state.transcription_result.get("edited", False):
+            st.success("✅ 編集済みの文字起こし結果を使用します")
+        else:
+            st.success("✅ 文字起こし結果を使用します")
+        
+        # 議事録作成用の編集機能
+        edit_for_minutes = st.checkbox("✏️ 議事録作成用にテキストを編集する", 
+                                      help="文字起こし結果を議事録作成専用に編集します（元の文字起こし結果は変更されません）",
+                                      key="edit_transcription_for_minutes")
+        
+        if edit_for_minutes:
+            # 議事録作成用の編集セッション状態を初期化
+            if 'minutes_edit_text' not in st.session_state:
+                st.session_state.minutes_edit_text = st.session_state.transcription_result["text"]
+                st.session_state.minutes_edit_saved = False
+            
+            st.info("💡 議事録作成専用の編集です。元の文字起こし結果は変更されません。")
+            
+            edited_minutes_text = st.text_area(
+                "議事録作成用テキスト（編集中）",
+                value=st.session_state.minutes_edit_text,
+                height=300,
+                help="議事録作成用にテキストを編集してください",
+                key="editable_minutes_text"
+            )
+            
+            # 保存とリセットボタン
+            col1, col2, col3 = st.columns([1, 1, 2])
+            with col1:
+                if st.button("💾 編集を保存", key="save_minutes_edit"):
+                    if edited_minutes_text is not None:
+                        st.session_state.minutes_edit_text = edited_minutes_text
+                        st.session_state.minutes_edit_saved = True
+                        st.success("✅ 議事録作成用の編集が保存されました！")
+                        st.rerun()
+                    else:
+                        st.error("テキストが空です")
+            
+            with col2:
+                if st.button("🔄 元に戻す", key="reset_minutes_edit"):
+                    st.session_state.minutes_edit_text = st.session_state.transcription_result["text"]
+                    st.session_state.minutes_edit_saved = False
+                    st.success("✅ 元の文字起こし結果に戻しました！")
+                    st.rerun()
+            
+            # 文字数の比較表示
+            original_length = len(st.session_state.transcription_result["text"])
+            edited_length = len(edited_minutes_text) if edited_minutes_text else 0
+            if edited_length != original_length:
+                with col3:
+                    st.metric(
+                        "文字数の変化", 
+                        f"{edited_length:,}", 
+                        delta=f"{edited_length - original_length:+,}"
+                    )
+            
+            # 保存状況の確認
+            if st.session_state.minutes_edit_saved:
+                transcription_text = st.session_state.minutes_edit_text
+                st.info("✅ 編集済みテキストを議事録作成に使用します")
+            else:
+                st.warning("⚠️ 編集内容がまだ保存されていません。「編集を保存」ボタンを押してください。")
+                return
+        else:
+            # 編集しない場合は元の文字起こし結果を使用
+            transcription_text = st.session_state.transcription_result["text"]
+            
+            # 議事録作成用編集のセッション状態をクリア
+            if 'minutes_edit_text' in st.session_state:
+                del st.session_state.minutes_edit_text
+            if 'minutes_edit_saved' in st.session_state:
+                del st.session_state.minutes_edit_saved
+        
+    elif input_method == "テキストファイルをアップロード":
+        st.info("💡 **コスト削減のヒント**: 既に文字起こし済みのテキストファイルを使用することで、Whisper APIの利用料金を節約できます！")
+        
+        uploaded_text_file = st.file_uploader(
+            "テキストファイルをアップロード",
+            type=['txt', 'md', 'rtf'],
+            help="会議の文字起こしテキストファイルをアップロードしてください"
+        )
+        
+        if uploaded_text_file is not None:
+            try:
+                # ファイルの内容を読み込み
+                raw_text = uploaded_text_file.read().decode('utf-8')
+                st.success(f"✅ ファイル '{uploaded_text_file.name}' を読み込みました")
+                
+                # セッション状態にアップロードしたテキストを保存
+                if 'uploaded_text_content' not in st.session_state or st.session_state.uploaded_text_content != raw_text:
+                    st.session_state.uploaded_text_content = raw_text
+                    st.session_state.uploaded_text_edited = False
+                    st.session_state.uploaded_text_original = raw_text
+                
+                # 編集機能
+                edit_uploaded = st.checkbox("✏️ アップロードしたテキストを編集する", key="edit_uploaded_text")
+                
+                if edit_uploaded:
+                    st.info("💡 テキストを編集してください。編集後は必ず「保存」ボタンを押してください。")
+                    edited_uploaded_text = st.text_area(
+                        "編集中のテキスト",
+                        value=st.session_state.uploaded_text_content,
+                        height=300,
+                        help="アップロードしたテキストを編集できます",
+                        key="editable_uploaded_text"
+                    )
+                    
+                    # 保存とリセットボタン
+                    col1, col2, col3 = st.columns([1, 1, 2])
+                    with col1:
+                        if st.button("💾 編集を保存", key="save_uploaded_text"):
+                            if edited_uploaded_text is not None:
+                                st.session_state.uploaded_text_content = edited_uploaded_text
+                                st.session_state.uploaded_text_edited = True
+                                st.success("✅ 編集が保存されました！")
+                                st.rerun()
+                            else:
+                                st.error("テキストが空です")
+                    
+                    with col2:
+                        if st.button("🔄 元に戻す", key="reset_uploaded_text"):
+                            st.session_state.uploaded_text_content = st.session_state.uploaded_text_original
+                            st.session_state.uploaded_text_edited = False
+                            st.success("✅ 元のテキストに戻しました！")
+                            st.rerun()
+                    
+                    # 文字数の比較表示
+                    original_length = len(st.session_state.uploaded_text_original)
+                    edited_length = len(edited_uploaded_text) if edited_uploaded_text else 0
+                    if edited_length != original_length:
+                        with col3:
+                            st.metric(
+                                "文字数の変化", 
+                                f"{edited_length:,}", 
+                                delta=f"{edited_length - original_length:+,}"
+                            )
+                else:
+                    # 読み取り専用表示
+                    with st.expander("📄 アップロードしたテキストのプレビュー", expanded=False):
+                        preview_text = st.session_state.uploaded_text_content[:1000]
+                        if len(st.session_state.uploaded_text_content) > 1000:
+                            preview_text += "..."
+                        st.text_area("テキストプレビュー", preview_text, height=200, disabled=True, key="text_file_preview", label_visibility="collapsed")
+                        
+                        # 編集状況の表示
+                        if st.session_state.uploaded_text_edited:
+                            st.info("ℹ️ このテキストは編集されています。")
+                        
+                        st.info(f"文字数: {len(st.session_state.uploaded_text_content):,} 文字")
+                
+                # 最終的なテキストを設定
+                transcription_text = st.session_state.uploaded_text_content
+                    
+            except UnicodeDecodeError:
+                st.error("❌ テキストファイルの読み込みに失敗しました。UTF-8形式のテキストファイルをアップロードしてください。")
+                return
+            except Exception as e:
+                st.error(f"❌ ファイル読み込みエラー: {str(e)}")
+                return
+        else:
+            st.info("テキストファイルをアップロードしてください")
+            return
+            
+    elif input_method == "直接テキスト入力":
+        st.info("💭 会議の文字起こしテキストを直接入力してください")
+        
+        # セッション状態の初期化
+        if 'direct_input_text' not in st.session_state:
+            st.session_state.direct_input_text = ""
+            st.session_state.direct_input_saved = False
+        
+        # テキスト入力エリア
+        input_text = st.text_area(
+            "文字起こしテキスト",
+            value=st.session_state.direct_input_text,
+            height=300,
+            placeholder="ここに会議の文字起こしテキストを入力してください...",
+            key="direct_text_input"
+        )
+        
+        # 保存ボタンと状態表示
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            if st.button("💾 テキストを保存", key="save_direct_input"):
+                if input_text and input_text.strip():
+                    st.session_state.direct_input_text = input_text
+                    st.session_state.direct_input_saved = True
+                    st.success("✅ テキストが保存されました！")
+                    st.rerun()
+                else:
+                    st.error("テキストが空です")
+        
+        with col2:
+            if st.button("🗑️ テキストをクリア", key="clear_direct_input"):
+                st.session_state.direct_input_text = ""
+                st.session_state.direct_input_saved = False
+                st.success("✅ テキストがクリアされました！")
+                st.rerun()
+        
+        # 文字数表示
+        if input_text:
+            with col3:
+                st.metric("入力文字数", f"{len(input_text):,} 文字")
+        
+        # 保存状況の表示
+        if st.session_state.direct_input_saved and st.session_state.direct_input_text:
+            st.success("✅ 保存済みテキストを使用します")
+            transcription_text = st.session_state.direct_input_text
+        elif input_text and input_text.strip():
+            st.warning("⚠️ テキストが入力されていますが、まだ保存されていません。「テキストを保存」ボタンを押してください。")
+            return
+        else:
+            st.info("テキストを入力してください")
+            return
+    
+    # テキストが空の場合は処理を停止
+    if not transcription_text or not transcription_text.strip():
+        st.warning("議事録作成のためのテキストが必要です")
+        return
     
     st.subheader("📋 議事録設定")
     
@@ -512,6 +806,142 @@ def render_meeting_minutes_section():
             placeholder="例：田中, 佐藤, 山田"
         )
     
+    # プロンプト設定
+    st.subheader("📝 プロンプト設定")
+    
+    # プロンプトテンプレート選択
+    audio_service: AudioService = st.session_state.audio_service
+    prompt_templates = audio_service.PROMPT_TEMPLATES
+    
+    prompt_mode = st.radio(
+        "プロンプト選択方法",
+        ["テンプレートを使用", "カスタムプロンプト"],
+        horizontal=True
+    )
+    
+    custom_prompt = None
+    prompt_template = "standard"
+    
+    if prompt_mode == "テンプレートを使用":
+        # テンプレート選択
+        template_options = {}
+        for template_key, template_data in prompt_templates.items():
+            label = f"{template_data['name']} - {template_data['description']}"
+            template_options[label] = template_key
+        
+        selected_template_label = st.selectbox(
+            "プロンプトテンプレート",
+            options=list(template_options.keys()),
+            index=0,
+            help="会議の種類に応じて適切なテンプレートを選択してください"
+        )
+        
+        prompt_template = template_options[selected_template_label]
+        
+        # 選択されたテンプレートのプレビュー
+        template_info = prompt_templates[prompt_template]
+        with st.expander(f"📄 選択されたテンプレート: {template_info['name']}", expanded=False):
+            st.markdown("**説明:**")
+            st.write(template_info['description'])
+            st.markdown("**プロンプト内容:**")
+            preview_prompt = template_info['prompt'].replace('{transcription_text}', '[文字起こしテキストがここに挿入されます]')
+            st.text_area("プロンプトプレビュー", preview_prompt, height=400, disabled=True, key="template_preview", label_visibility="collapsed")
+    
+    else:
+        # カスタムプロンプト入力
+        st.info("💡 **カスタムプロンプトのヒント**: `{transcription_text}` の部分に文字起こしテキストが自動で挿入されます")
+        
+        # デフォルトとして標準テンプレートを表示
+        default_template = prompt_templates['standard']['prompt']
+        
+        custom_prompt = st.text_area(
+            "カスタムプロンプト",
+            value=default_template,
+            height=300,
+            help="独自の要件に合わせてプロンプトをカスタマイズできます。{transcription_text} は必須です。"
+        )
+        
+        # プロンプトの検証
+        if custom_prompt and '{transcription_text}' not in custom_prompt:
+            st.warning("⚠️ カスタムプロンプトに `{transcription_text}` が含まれていません。文字起こしテキストが挿入されない可能性があります。")
+
+    # AI モデル選択とコスト情報
+    st.subheader("🤖 AIモデル設定")
+    
+    # 利用可能なモデル情報を取得
+    audio_service: AudioService = st.session_state.audio_service
+    available_models = AudioService.AVAILABLE_MODELS
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # モデル選択
+        model_options = {}
+        for model_key, model_data in available_models.items():
+            label = f"{model_data['name']} - {model_data['description']}"
+            model_options[label] = model_key
+        
+        selected_model_label = st.selectbox(
+            "議事録生成用モデル",
+            options=list(model_options.keys()),
+            index=0,  # デフォルトはgpt-4o-mini
+            help="モデルによって料金と品質が異なります"
+        )
+        selected_model = model_options[selected_model_label]
+    
+    with col2:
+        # コスト概算表示
+        if transcription_text:
+            # コスト概算関数を直接呼び出し
+            text_length = len(transcription_text)
+            model_info = available_models.get(selected_model, available_models["gpt-4o-mini"])
+            
+            # 概算トークン数
+            estimated_input_tokens = int(text_length / 2.5)  # 日本語メイン
+            estimated_output_tokens = 1000  # 議事録出力の平均
+            
+            input_cost = (estimated_input_tokens / 1_000_000) * model_info["input_cost_per_1m"]
+            output_cost = (estimated_output_tokens / 1_000_000) * model_info["output_cost_per_1m"]
+            total_cost = input_cost + output_cost
+            
+            st.metric(
+                "予想コスト",
+                f"${total_cost:.4f}",
+                help=f"入力: {estimated_input_tokens} tokens\n出力: {estimated_output_tokens} tokens"
+            )
+        else:
+            st.metric("予想コスト", "計算待ち", help="文字起こし完了後に表示")
+    
+    # モデル詳細情報（展開可能）
+    with st.expander("📊 モデル詳細・料金情報", expanded=False):
+        model_info = available_models[selected_model]
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.write("**入力料金**")
+            st.write(f"${model_info['input_cost_per_1m']:.2f}/1M tokens")
+        with col2:
+            st.write("**出力料金**") 
+            st.write(f"${model_info['output_cost_per_1m']:.2f}/1M tokens")
+        with col3:
+            st.write("**最大トークン数**")
+            st.write(f"{model_info['max_tokens']:,}")
+        
+        st.write(f"**推奨用途**: {model_info['recommended_for']}")
+        
+        # 全モデル比較テーブル
+        st.write("**全モデル比較**:")
+        comparison_data = []
+        for model_key, model_data in available_models.items():
+            comparison_data.append({
+                "モデル": model_data['name'],
+                "説明": model_data['description'],
+                "入力料金 ($/1M tokens)": f"${model_data['input_cost_per_1m']:.2f}",
+                "出力料金 ($/1M tokens)": f"${model_data['output_cost_per_1m']:.2f}",
+                "推奨用途": model_data['recommended_for']
+            })
+        st.table(comparison_data)
+    
     # 参加者リスト作成
     participants = None
     if participants_input:
@@ -522,7 +952,7 @@ def render_meeting_minutes_section():
     preview_text = transcription_text[:1000]
     if len(transcription_text) > 1000:
         preview_text += "..."
-    st.text_area("", preview_text, height=200, disabled=True)
+    st.text_area("最終入力テキスト", preview_text, height=200, disabled=True, key="final_text_preview", label_visibility="collapsed")
     
     # 議事録生成ボタン
     if st.button("📋 議事録を生成", type="primary"):
@@ -533,11 +963,50 @@ def render_meeting_minutes_section():
                 result = audio_service.create_meeting_minutes(
                     transcribed_text=transcription_text,
                     meeting_title=meeting_title,
-                    participants=participants
+                    participants=participants,
+                    model=selected_model,
+                    custom_prompt=custom_prompt,
+                    prompt_template=prompt_template
                 )
                 
                 if result["success"]:
                     st.success("✅ 議事録の生成が完了しました！")
+                    
+                    # コスト情報を表示
+                    if 'cost_info' in result:
+                        cost_info = result['cost_info']
+                        st.subheader("💰 生成コスト情報")
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric(
+                                "使用モデル",
+                                cost_info['model_used']
+                            )
+                        with col2:
+                            if 'input_tokens' in cost_info:
+                                st.metric(
+                                    "入力トークン数",
+                                    f"{cost_info['input_tokens']:,}"
+                                )
+                            else:
+                                st.metric("入力トークン数", "N/A")
+                        with col3:
+                            if 'output_tokens' in cost_info:
+                                st.metric(
+                                    "出力トークン数",
+                                    f"{cost_info['output_tokens']:,}"
+                                )
+                            else:
+                                st.metric("出力トークン数", "N/A")
+                        with col4:
+                            if isinstance(cost_info['estimated_cost_usd'], str):
+                                st.metric("推定コスト", cost_info['estimated_cost_usd'])
+                            else:
+                                st.metric(
+                                    "推定コスト",
+                                    f"${cost_info['estimated_cost_usd']:.6f}"
+                                )
+                        st.divider()
                     
                     minutes = result["minutes"]
                     
